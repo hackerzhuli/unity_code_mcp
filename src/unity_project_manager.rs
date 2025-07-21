@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use serde::{Deserialize, Serialize};
+use sysinfo::{System, Pid, ProcessesToUpdate, ProcessRefreshKind};
 use tokio::fs as async_fs;
 
 #[derive(Debug, Clone)]
@@ -165,31 +165,22 @@ impl UnityProjectManager {
 
     /// Checks if a process with the given PID is running and is Unity.exe
     fn is_unity_process_running(&self, pid: u32) -> bool {
-        #[cfg(target_os = "windows")]
-        {
-            // Use tasklist command on Windows to check if process exists and is Unity.exe
-            if let Ok(output) = Command::new("tasklist")
-                .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
-                .output()
+        let mut system = System::new();
+        system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::everything());
+        
+        if let Some(process) = system.process(Pid::from(pid as usize)) {
+            let process_name = process.name().to_string_lossy();
+            // Check for Unity.exe on Windows, Unity on other platforms
+            #[cfg(target_os = "windows")]
             {
-                let output_str = String::from_utf8_lossy(&output.stdout);
-                output_str.to_lowercase().contains("unity.exe")
-            } else {
-                false
+                process_name.eq_ignore_ascii_case("Unity.exe")
             }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            // Use ps command on Unix-like systems
-            if let Ok(output) = Command::new("ps")
-                .args(["-p", &pid.to_string(), "-o", "comm="])
-                .output()
+            #[cfg(not(target_os = "windows"))]
             {
-                let output_str = String::from_utf8_lossy(&output.stdout);
-                output_str.trim().to_lowercase().contains("unity")
-            } else {
-                false
+                process_name.eq_ignore_ascii_case("Unity")
             }
+        } else {
+            false
         }
     }
 
