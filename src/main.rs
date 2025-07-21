@@ -9,7 +9,7 @@ async fn main() {
 
     // Example usage with the embedded Unity project
     let project_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject");
-    let manager = UnityProjectManager::new(&project_path);
+    let manager = UnityProjectManager::new(project_path.to_string_lossy().to_string());
 
     println!("Project path: {}", project_path.display());
     println!("Is Unity project: {}", manager.is_unity_project());
