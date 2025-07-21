@@ -313,6 +313,27 @@ impl UnityMessagingClient {
                     let ping = Message::ping();
                     if let Err(e) = socket.send_to(&ping.serialize(), unity_address).await {
                         eprintln!("Failed to send ping: {}", e);
+                        // Mark Unity as offline when ping fails
+                        if let Ok(mut online) = is_online.lock() {
+                            *online = false;
+                        }
+                    } else {
+                        // Check if Unity has been unresponsive for too long (5 seconds)
+                        let should_mark_offline = if let Ok(last_time) = last_response_time.lock() {
+                            if let Some(time) = *last_time {
+                                time.elapsed() > Duration::from_secs(5)
+                            } else {
+                                true // No response ever received
+                            }
+                        } else {
+                            false
+                        };
+                        
+                        if should_mark_offline {
+                            if let Ok(mut online) = is_online.lock() {
+                                *online = false;
+                            }
+                        }
                     }
                 }
                 
@@ -330,11 +351,13 @@ impl UnityMessagingClient {
                                 match message.message_type {
                                     MessageType::Online => {
                                         if let Ok(mut online) = is_online.lock() {
+                                            println!("[CLIENT] Received Online message, setting state to true (timestamp: {:?})", std::time::Instant::now());
                                             *online = true;
                                         }
                                     }
                                     MessageType::Offline => {
                                         if let Ok(mut online) = is_online.lock() {
+                                            println!("[CLIENT] Received Offline message, setting state to false (timestamp: {:?})", std::time::Instant::now());
                                             *online = false;
                                         }
                                     }
@@ -364,7 +387,13 @@ impl UnityMessagingClient {
                         }
                         Err(e) => {
                             eprintln!("Socket error in message listener: {}", e);
-                            break;
+                            // Mark Unity as offline when socket errors occur
+                            if let Ok(mut online) = is_online.lock() {
+                                *online = false;
+                            }
+                            // Try to continue listening instead of breaking immediately
+                            // Unity might reconnect after compilation
+                            tokio::time::sleep(Duration::from_millis(100)).await;
                         }
                     }
                 }
@@ -430,18 +459,43 @@ impl UnityMessagingClient {
     pub async fn send_message(&self, message: &Message, expect_response: bool) -> Result<Option<Message>, UnityMessagingError> {
         // Serialize and send the message
         let data = message.serialize();
-        self.socket.send_to(&data, self.unity_address).await?;
+        match self.socket.send_to(&data, self.unity_address).await {
+            Ok(_) => {},
+            Err(e) => {
+                // Mark Unity as offline when send fails
+                if let Ok(mut online) = self.is_online.lock() {
+                    *online = false;
+                }
+                return Err(e.into());
+            }
+        }
 
         if expect_response {
             // Wait for response with timeout
             let mut buffer = [0u8; 8192]; // 8KB buffer as per protocol
-            let (bytes_received, _) = tokio::time::timeout(
+            match tokio::time::timeout(
                 Duration::from_secs(5),
                 self.socket.recv_from(&mut buffer)
-            ).await.map_err(|_| UnityMessagingError::Timeout)??;
-            
-            let response = Message::deserialize(&buffer[..bytes_received])?;
-            Ok(Some(response))
+            ).await {
+                Ok(Ok((bytes_received, _))) => {
+                    let response = Message::deserialize(&buffer[..bytes_received])?;
+                    Ok(Some(response))
+                },
+                Ok(Err(e)) => {
+                    // Mark Unity as offline when receive fails
+                    if let Ok(mut online) = self.is_online.lock() {
+                        *online = false;
+                    }
+                    Err(e.into())
+                },
+                Err(_) => {
+                    // Mark Unity as offline on timeout
+                    if let Ok(mut online) = self.is_online.lock() {
+                        *online = false;
+                    }
+                    Err(UnityMessagingError::Timeout)
+                }
+            }
         } else {
             Ok(None)
         }
