@@ -208,7 +208,7 @@ pub enum UnityMessagingError {
 
 /// Unity messaging client that communicates via UDP with event broadcasting
 pub struct UnityMessagingClient {
-    socket: std::net::UdpSocket,
+    socket: tokio::net::UdpSocket,
     unity_address: SocketAddr,
     _timeout_duration: Duration,
     event_sender: broadcast::Sender<UnityEvent>,
@@ -226,15 +226,13 @@ impl UnityMessagingClient {
     /// # Returns
     /// 
     /// Returns a `Result` containing the client or an error
-    pub fn new(unity_process_id: u32) -> Result<Self, UnityMessagingError> {
+    pub async fn new(unity_process_id: u32) -> Result<Self, UnityMessagingError> {
         // Calculate Unity's messaging port: 58000 + (ProcessId % 1000)
         let unity_port = 58000 + (unity_process_id % 1000);
         let unity_address = SocketAddr::from(([127, 0, 0, 1], unity_port as u16));
 
-        // Create UDP socket
-        let socket = std::net::UdpSocket::bind("0.0.0.0:0")?; // Bind to any available port
-        socket.set_read_timeout(Some(Duration::from_secs(5)))?;
-        socket.set_write_timeout(Some(Duration::from_secs(5)))?;
+        // Create UDP socket using tokio
+        let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?; // Bind to any available port
 
         // Create broadcast channel for events
         let (event_sender, _event_receiver) = broadcast::channel(1000);
@@ -258,22 +256,20 @@ impl UnityMessagingClient {
     /// # Returns
     /// 
     /// Returns `Ok(())` if the listener was started successfully
-    pub fn start_listening(&mut self) -> Result<(), UnityMessagingError> {
+    pub async fn start_listening(&mut self) -> Result<(), UnityMessagingError> {
         if self.listener_task.is_some() {
             return Ok(()); // Already listening
         }
 
-        // Clone necessary data for the background task
-        let socket = self.socket.try_clone()?;
+        // Create a new socket for the background task (since we can't clone tokio sockets)
+        let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
         let unity_address = self.unity_address;
         let event_sender = self.event_sender.clone();
         let last_response_time = self.last_response_time.clone();
 
         // Spawn background task for message listening
         let task = tokio::spawn(async move {
-            // Convert std::net::UdpSocket to tokio::net::UdpSocket
-            let tokio_socket = UdpSocket::from_std(socket).expect("Failed to convert socket");
-            Self::message_listener_task(tokio_socket, unity_address, event_sender, last_response_time).await;
+            Self::message_listener_task(socket, unity_address, event_sender, last_response_time).await;
         });
 
         self.listener_task = Some(task);
@@ -304,40 +300,49 @@ impl UnityMessagingClient {
         last_response_time: std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>,
     ) {
         let mut buffer = [0u8; 8192];
+        let mut ping_interval = tokio::time::interval(Duration::from_secs(1));
         
         loop {
-            // Use tokio's timeout for async operations
-            match tokio::time::timeout(Duration::from_millis(100), socket.recv_from(&mut buffer)).await {
-                Ok(Ok((bytes_received, _))) => {
-                    if let Ok(message) = Message::deserialize(&buffer[..bytes_received]) {
-                        // Update last response time for any valid message
-                        if let Ok(mut time) = last_response_time.lock() {
-                            *time = Some(std::time::Instant::now());
-                        }
-                        
-                        // Handle the message and potentially broadcast an event
-                        if let Some(event) = Self::message_to_event(&message) {
-                            if let Err(_) = event_sender.send(event) {
-                                // No receivers, continue listening
-                            }
-                        }
-                        
-                        // Handle internal messages (ping/pong)
-                        if message.message_type == MessageType::Ping {
-                            let pong = Message::pong();
-                            if let Err(e) = socket.send_to(&pong.serialize(), unity_address).await {
-                                eprintln!("Failed to send pong response: {}", e);
-                            }
-                        }
+            tokio::select! {
+                // Send periodic ping to keep connection alive (Unity times out after 4 seconds)
+                _ = ping_interval.tick() => {
+                    let ping = Message::ping();
+                    if let Err(e) = socket.send_to(&ping.serialize(), unity_address).await {
+                        eprintln!("Failed to send ping: {}", e);
                     }
                 }
-                Ok(Err(e)) => {
-                    eprintln!("Socket error in message listener: {}", e);
-                    break;
-                }
-                Err(_) => {
-                    // Timeout occurred, continue listening
-                    continue;
+                
+                // Listen for incoming messages
+                result = socket.recv_from(&mut buffer) => {
+                    match result {
+                        Ok((bytes_received, _)) => {
+                            if let Ok(message) = Message::deserialize(&buffer[..bytes_received]) {
+                                // Update last response time for any valid message
+                                if let Ok(mut time) = last_response_time.lock() {
+                                    *time = Some(std::time::Instant::now());
+                                }
+                                
+                                // Handle the message and potentially broadcast an event
+                                if let Some(event) = Self::message_to_event(&message) {
+                                    if let Err(_) = event_sender.send(event) {
+                                        // No receivers, continue listening
+                                    }
+                                }
+                                
+                                // Handle internal messages (ping/pong)
+                                if message.message_type == MessageType::Ping {
+                                    let pong = Message::pong();
+                                    if let Err(e) = socket.send_to(&pong.serialize(), unity_address).await {
+                                        eprintln!("Failed to send pong response: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Socket error in message listener: {}", e);
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -398,15 +403,18 @@ impl UnityMessagingClient {
     /// # Returns
     /// 
     /// Returns the response message if `expect_response` is true, otherwise None
-    pub fn send_message(&self, message: &Message, expect_response: bool) -> Result<Option<Message>, UnityMessagingError> {
+    pub async fn send_message(&self, message: &Message, expect_response: bool) -> Result<Option<Message>, UnityMessagingError> {
         // Serialize and send the message
         let data = message.serialize();
-        self.socket.send_to(&data, self.unity_address)?;
+        self.socket.send_to(&data, self.unity_address).await?;
 
         if expect_response {
-            // Wait for response
+            // Wait for response with timeout
             let mut buffer = [0u8; 8192]; // 8KB buffer as per protocol
-            let (bytes_received, _) = self.socket.recv_from(&mut buffer)?;
+            let (bytes_received, _) = tokio::time::timeout(
+                Duration::from_secs(5),
+                self.socket.recv_from(&mut buffer)
+            ).await.map_err(|_| UnityMessagingError::Timeout)??;
             
             let response = Message::deserialize(&buffer[..bytes_received])?;
             Ok(Some(response))
@@ -440,10 +448,10 @@ impl UnityMessagingClient {
     /// # Returns
     /// 
     /// Returns the Unity package version string
-    pub fn get_version(&self) -> Result<String, UnityMessagingError> {
+    pub async fn get_version(&self) -> Result<String, UnityMessagingError> {
         let version_message = Message::new(MessageType::Version, String::new());
         
-        match self.send_message(&version_message, true)? {
+        match self.send_message(&version_message, true).await? {
             Some(response) if response.message_type == MessageType::Version => Ok(response.value),
             Some(response) => Err(UnityMessagingError::InvalidMessage(
                 format!("Expected Version response, got {:?}", response.message_type)
@@ -457,10 +465,10 @@ impl UnityMessagingClient {
     /// # Returns
     /// 
     /// Returns the Unity project path
-    pub fn get_project_path(&self) -> Result<String, UnityMessagingError> {
+    pub async fn get_project_path(&self) -> Result<String, UnityMessagingError> {
         let project_path_message = Message::new(MessageType::ProjectPath, String::new());
         
-        match self.send_message(&project_path_message, true)? {
+        match self.send_message(&project_path_message, true).await? {
             Some(response) if response.message_type == MessageType::ProjectPath => Ok(response.value),
             Some(response) => Err(UnityMessagingError::InvalidMessage(
                 format!("Expected ProjectPath response, got {:?}", response.message_type)
@@ -474,9 +482,9 @@ impl UnityMessagingClient {
     /// # Returns
     /// 
     /// Returns `Ok(())` if the message was sent successfully
-    pub fn send_refresh_message(&self) -> Result<(), UnityMessagingError> {
+    pub async fn send_refresh_message(&self) -> Result<(), UnityMessagingError> {
         let refresh_message = Message::new(MessageType::Refresh, String::new());
-        self.socket.send_to(&refresh_message.serialize(), self.unity_address)?;
+        self.socket.send_to(&refresh_message.serialize(), self.unity_address).await?;
         Ok(())
     }
 

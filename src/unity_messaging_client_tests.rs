@@ -24,12 +24,12 @@ fn test_empty_message_serialization() {
     assert!(message.value.is_empty());
 }
 
-#[test]
-fn test_port_calculation() {
+#[tokio::test]
+async fn test_port_calculation() {
     let process_id = 12345u32;
     let expected_port = 58000 + (process_id % 1000);
     
-    let client = UnityMessagingClient::new(process_id).unwrap();
+    let client = UnityMessagingClient::new(process_id).await.unwrap();
     assert_eq!(client.unity_address().port(), expected_port as u16);
 }
 
@@ -51,7 +51,7 @@ async fn test_unity_messaging_integration() {
     }
 
     let unity_process_id = manager.unity_process_id().expect("Unity process ID should be available");
-    let mut client = match UnityMessagingClient::new(unity_process_id) {
+    let mut client = match UnityMessagingClient::new(unity_process_id).await {
         Ok(client) => client,
         Err(e) => {
             println!("Skipping integration test: Failed to create messaging client: {}", e);
@@ -60,7 +60,7 @@ async fn test_unity_messaging_integration() {
     };
 
     // Test connection functionality
-    if let Err(e) = client.start_listening() {
+    if let Err(e) = client.start_listening().await {
         println!("Failed to start listening: {}", e);
         return;
     }
@@ -80,13 +80,13 @@ async fn test_unity_messaging_integration() {
     client.stop_listening();
 
     // Test version retrieval
-    match client.get_version() {
+    match client.get_version().await {
         Ok(version) => println!("✓ Unity package version: {}", version),
         Err(e) => println!("Failed to get Unity version: {}", e),
     }
 
     // Test project path retrieval
-    match client.get_project_path() {
+    match client.get_project_path().await {
         Ok(path) => println!("✓ Unity project path: {}", path),
         Err(e) => println!("Failed to get Unity project path: {}", e),
     }
@@ -117,7 +117,7 @@ async fn test_unity_log_generation_and_listening() {
         }
     };
     
-    let mut client = match UnityMessagingClient::new(unity_process_id) {
+    let mut client = match UnityMessagingClient::new(unity_process_id).await {
         Ok(client) => client,
         Err(e) => {
             println!("Skipping log test: Failed to create messaging client: {}", e);
@@ -131,7 +131,7 @@ async fn test_unity_log_generation_and_listening() {
     let mut event_receiver = client.subscribe_to_events();
 
     // Start listening for Unity events
-    if let Err(e) = client.start_listening() {
+    if let Err(e) = client.start_listening().await {
         println!("Failed to start listening: {}", e);
         return;
     }
@@ -141,7 +141,7 @@ async fn test_unity_log_generation_and_listening() {
 
     // Test basic connectivity first with a ping
     println!("Testing Unity connectivity with ping...");
-    match client.send_message(&Message::ping(), false) {
+    match client.send_message(&Message::ping(), false).await {
         Ok(_) => println!("✓ Ping sent successfully"),
         Err(e) => {
             println!("⚠ Failed to send ping to Unity: {}", e);
@@ -156,49 +156,60 @@ async fn test_unity_log_generation_and_listening() {
     println!("Created test USS file: {}", uss_path.display());
 
     // Send refresh message to Unity
-    if let Err(e) = client.send_refresh_message() {
+    if let Err(e) = client.send_refresh_message().await {
         println!("Failed to send refresh message: {}", e);
         cleanup_test_uss_file(&uss_path);
         return;
     }
     println!("✓ Sent refresh message to Unity");
 
-    // Listen for log messages with a strict timeout
-    println!("Listening for Unity log messages for 8 seconds...");
+    // Listen for log messages with a reasonable timeout
+    println!("Listening for Unity log messages for 3 seconds...");
     let mut log_count = 0;
     let start_time = std::time::Instant::now();
-    let timeout_duration = Duration::from_secs(8);
+    let timeout_duration = Duration::from_secs(3);
     
-    // Listen for events until timeout or first log message
-    while start_time.elapsed() < timeout_duration {
-        match tokio::time::timeout(Duration::from_millis(100), event_receiver.recv()).await {
-            Ok(Ok(event)) => {
-                match event {
-                    UnityEvent::LogMessage { level, message } => {
-                        log_count += 1;
-                        match level {
-                            LogLevel::Info => println!("[INFO] {}", message),
-                            LogLevel::Warning => println!("[WARNING] {}", message),
-                            LogLevel::Error => println!("[ERROR] {}", message),
-                        }
-                        // Exit early after receiving first log message to keep test fast
-                        break;
+    // Start a background task to continuously listen for events
+    let (log_sender, mut log_receiver) = tokio::sync::mpsc::channel(100);
+    let event_listener = tokio::spawn(async move {
+        loop {
+            match event_receiver.recv().await {
+                Ok(event) => {
+                    if let UnityEvent::LogMessage { level, message } = event {
+                        let _ = log_sender.send((level, message)).await;
                     }
-                    _ => {
-                        // Ignore other event types for this test
-                    }
+                    // Continue listening for more events
+                }
+                Err(_) => {
+                    // Channel closed, exit
+                    break;
                 }
             }
-            Ok(Err(_)) => {
-                // Channel error (e.g., sender dropped)
-                break;
-            }
-            Err(_) => {
-                // Timeout occurred, continue listening
-                continue;
+        }
+    });
+    
+    // Wait for log messages with timeout
+    match tokio::time::timeout(timeout_duration, log_receiver.recv()).await {
+        Ok(Some((level, message))) => {
+            log_count += 1;
+            let receive_time = start_time.elapsed();
+            println!("✓ Received log message after {:.3}s", receive_time.as_secs_f32());
+            match level {
+                LogLevel::Info => println!("[INFO] {}", message),
+                LogLevel::Warning => println!("[WARNING] {}", message),
+                LogLevel::Error => println!("[ERROR] {}", message),
             }
         }
+        Ok(None) => {
+            // Channel closed without receiving message
+        }
+        Err(_) => {
+            // Timeout occurred
+        }
     }
+    
+    // Stop the event listener
+    event_listener.abort();
 
     println!("✓ Log listening completed. Received {} log messages in {} seconds", 
             log_count, start_time.elapsed().as_secs_f32());

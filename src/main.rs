@@ -34,12 +34,12 @@ async fn main() {
                         
                         // Test messaging client if Unity is running
                         println!("\nTesting Unity messaging client...");
-                        match UnityMessagingClient::new(pid) {
+                        match UnityMessagingClient::new(pid).await {
                             Ok(mut client) => {
                                 println!("Created messaging client, Unity address: {}", client.unity_address());
                                 
                                 // Start listening for Unity messages to track connection status
-                                if let Err(e) = client.start_listening() {
+                                if let Err(e) = client.start_listening().await {
                                     println!("Failed to start listening: {}", e);
                                     return;
                                 }
@@ -52,11 +52,11 @@ async fn main() {
                                     println!("✓ Unity connection test successful!");
                                     
                                     // Try to get version and project path
-                                    if let Ok(version) = client.get_version() {
+                                    if let Ok(version) = client.get_version().await {
                                         println!("Unity package version: {}", version);
                                     }
                                     
-                                    if let Ok(project_path) = client.get_project_path() {
+                                    if let Ok(project_path) = client.get_project_path().await {
                                         println!("Unity project path: {}", project_path);
                                     }
                                 } else {
