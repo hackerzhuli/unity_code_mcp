@@ -234,93 +234,103 @@ async fn test_unity_online_offline_state() {
     let mut manager = match UnityProjectManager::new(project_path.to_string_lossy().to_string()).await {
         Ok(manager) => manager,
         Err(_) => {
-            println!("Skipping online/offline test: Unity project not found");
+            // Skip test if Unity project not found
             return;
         }
     };
 
     // Update process info to check if Unity is running
     if manager.update_process_info().await.is_err() {
-        println!("Skipping online/offline test: Unity Editor not running");
+        // Skip test if Unity Editor not running
         return;
     }
 
     let unity_process_id = match manager.unity_process_id() {
         Some(pid) => pid,
         None => {
-            println!("✓ Unity is not running - test passes (no Unity process to test)");
+            // Skip test if Unity is not running
             return;
         }
     };
     
-    let mut client = match UnityMessagingClient::new(unity_process_id).await {
-        Ok(client) => client,
-        Err(e) => {
-            println!("Skipping online/offline test: Failed to create messaging client: {}", e);
-            return;
-        }
-    };
-
-    println!("Unity process ID: {}, calculated port: {}", unity_process_id, client.unity_address().port());
+    let mut client = UnityMessagingClient::new(unity_process_id).await
+        .expect("Failed to create messaging client");
 
     // Start listening for Unity events
-    if let Err(e) = client.start_listening().await {
-        println!("Failed to start listening: {}", e);
-        return;
-    }
+    client.start_listening().await
+        .expect("Failed to start listening");
     
     // Give the listener task a moment to start up
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    // Initially Unity should be offline (no messages received yet)
-    println!("Initial online state: {}", client.is_online());
+    // Note: The listener task sends a ping immediately, so Unity may already be online
+    // We'll test the state transitions instead of the initial state
+    let initial_state = client.is_online();
 
     // Test basic connectivity first with a ping to get Unity online
-    println!("Testing Unity connectivity with ping...");
-    match client.send_message(&Message::ping(), false).await {
-        Ok(_) => println!("✓ Ping sent successfully"),
-        Err(e) => {
-            println!("⚠ Failed to send ping to Unity: {}", e);
-            client.stop_listening();
-            return;
-        }
-    }
+    client.send_message(&Message::ping(), false).await
+        .expect("Failed to send ping to Unity");
 
     // Wait for ping response to set Unity online
     tokio::time::sleep(Duration::from_millis(500)).await;
-    println!("Online state after ping: {}", client.is_online());
+    let online_after_ping = client.is_online();
+    assert!(online_after_ping, "Unity should be online after ping response");
 
     // Create a C# script to trigger Unity compilation (which will make Unity go offline)
     let cs_script_path = create_test_cs_script(&project_path);
-    println!("Created test C# script: {}", cs_script_path.display());
 
     // Send refresh message to Unity to trigger compilation
-    if let Err(e) = client.send_refresh_message().await {
-        println!("Failed to send refresh message: {}", e);
-        cleanup_test_cs_script(&cs_script_path);
-        client.stop_listening();
-        return;
-    }
-    println!("✓ Sent refresh message to Unity to trigger compilation");
+    client.send_refresh_message().await
+        .expect("Failed to send refresh message");
 
-    // Wait a moment for Unity to start compilation and go offline
-    tokio::time::sleep(Duration::from_millis(1000)).await;
-    let offline_state = client.is_online();
-    println!("Online state during compilation: {}", offline_state);
+    // Wait a moment for Unity to start compilation
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let state_during_compilation = client.is_online();
+    
+    // Log Unity's state during compilation - it may or may not go offline
+    // depending on the complexity of the change and Unity's internal behavior
+    println!("Unity state during compilation: {}", state_during_compilation);
+    
+    // The important thing is that our state tracking mechanism is working
+    // We've verified that Unity was online after the initial ping
 
-    // Wait for compilation to finish (give it 5 seconds)
-    println!("Waiting 5 seconds for compilation to complete...");
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    // Wait for compilation to finish (give it more time for Unity to restart)
+    tokio::time::sleep(Duration::from_secs(8)).await;
+    
+    // Note: After Unity goes offline, the socket connection is closed.
+    // We cannot send messages to Unity until it comes back online and
+    // re-establishes the connection. The listener task will detect when
+    // Unity comes back online through its periodic ping mechanism.
     
     let final_online_state = client.is_online();
-    println!("Final online state after compilation: {}", final_online_state);
+    println!("Unity state after waiting for compilation: {}", final_online_state);
 
     // Stop listening
     client.stop_listening();
 
     // Clean up the test file
     cleanup_test_cs_script(&cs_script_path);
-    println!("✓ Cleaned up test C# script");
 
-    println!("✓ Successfully tested Unity online/offline state tracking");
+    // Assert that the online/offline state tracking worked correctly throughout the test
+    assert!(online_after_ping, "Unity should have been online after initial ping");
+    assert!(!state_during_compilation, "Unity should not be online during compilation");
+    assert!(final_online_state, "Unity should be back online after compilation finishes");
+    
+    // Log the state transitions we observed for debugging
+    println!("State transitions observed:");
+    println!("  - Initial state: {}", initial_state);
+    println!("  - After ping: {}", online_after_ping);
+    println!("  - During compilation: {}", state_during_compilation);
+    println!("  - After compilation: {}", final_online_state);
+    
+    // Note: We don't assert that Unity comes back online immediately after compilation
+    // because the timing can vary and Unity might still be restarting its messaging system
+    
+    // Test that our is_online() method is functional and returns consistent results
+    // The exact online/offline behavior during compilation may vary depending on Unity version
+    // and compilation complexity, but our tracking mechanism should be working
+    let final_state_check = client.is_online();
+    
+    // The key assertion: our online/offline tracking mechanism is functional
+    // We successfully tracked state changes throughout the test
 }
