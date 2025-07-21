@@ -9,20 +9,27 @@ async fn main() {
 
     // Example usage with the embedded Unity project
     let project_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject");
-    let manager = UnityProjectManager::new(project_path.to_string_lossy().to_string());
-
+    
     println!("Project path: {}", project_path.display());
-    println!("Is Unity project: {}", manager.is_unity_project());
-
-    if manager.is_unity_project() {
-        match manager.get_unity_editor_version().await {
-            Ok(version) => println!("Unity version: {}", version),
-            Err(e) => println!("Failed to get Unity version: {}", e),
-        }
-
-        match manager.get_unity_process_id().await {
-            Ok(pid) => println!("Unity process ID: {}", pid),
-            Err(e) => println!("Unity process not found: {}", e),
-        }
+    
+    match UnityProjectManager::new(project_path.to_string_lossy().to_string()).await {
+        Ok(mut manager) => {
+            println!("Successfully initialized Unity project manager");
+            
+            if let Some(version) = manager.unity_version() {
+                println!("Unity version: {}", version);
+            }
+            
+            // Try to update process info
+            match manager.update_process_info().await {
+                Ok(()) => {
+                    if let Some(pid) = manager.unity_process_id() {
+                        println!("Unity process ID: {}", pid);
+                    }
+                },
+                Err(e) => println!("Unity process not found: {}", e),
+            }
+        },
+        Err(e) => println!("Failed to initialize Unity project manager: {}", e),
     }
 }
