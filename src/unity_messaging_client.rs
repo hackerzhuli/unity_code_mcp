@@ -345,8 +345,8 @@ impl UnityMessagingClient {
                     match result {
                         Ok((bytes_received, _)) => {
                             if let Ok(message) = Message::deserialize(&buffer[..bytes_received]) {
-                                // Debug logging for all received messages except Ping and Pong
-                                if !matches!(message.message_type, MessageType::Ping | MessageType::Pong) {
+                                // Debug logging for all received messages except Ping and Pong and logs
+                                if !matches!(message.message_type, MessageType::Ping | MessageType::Pong | MessageType::Info | MessageType::Warning | MessageType::Error) {
                                     println!("[DEBUG] Received Unity message: {:?} with value: '{}'", message.message_type, message.value);
                                 }
                                 
