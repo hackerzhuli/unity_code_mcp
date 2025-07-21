@@ -3,7 +3,6 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::net::UdpSocket;
-use serde::Deserialize;
 
 /// Message types as defined in the Unity Package Messaging Protocol
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,6 +213,7 @@ pub struct UnityMessagingClient {
     _timeout_duration: Duration,
     event_sender: broadcast::Sender<UnityEvent>,
     listener_task: Option<JoinHandle<()>>,
+    last_response_time: std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>,
 }
 
 impl UnityMessagingClient {
@@ -237,7 +237,7 @@ impl UnityMessagingClient {
         socket.set_write_timeout(Some(Duration::from_secs(5)))?;
 
         // Create broadcast channel for events
-        let (event_sender, event_receiver) = broadcast::channel(1000);
+        let (event_sender, _event_receiver) = broadcast::channel(1000);
 
         Ok(Self {
             socket,
@@ -245,6 +245,7 @@ impl UnityMessagingClient {
             _timeout_duration: Duration::from_secs(5),
             event_sender,
             listener_task: None,
+            last_response_time: std::sync::Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -266,12 +267,13 @@ impl UnityMessagingClient {
         let socket = self.socket.try_clone()?;
         let unity_address = self.unity_address;
         let event_sender = self.event_sender.clone();
+        let last_response_time = self.last_response_time.clone();
 
         // Spawn background task for message listening
         let task = tokio::spawn(async move {
             // Convert std::net::UdpSocket to tokio::net::UdpSocket
             let tokio_socket = UdpSocket::from_std(socket).expect("Failed to convert socket");
-            Self::message_listener_task(tokio_socket, unity_address, event_sender).await;
+            Self::message_listener_task(tokio_socket, unity_address, event_sender, last_response_time).await;
         });
 
         self.listener_task = Some(task);
@@ -299,6 +301,7 @@ impl UnityMessagingClient {
         socket: UdpSocket,
         unity_address: SocketAddr,
         event_sender: broadcast::Sender<UnityEvent>,
+        last_response_time: std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>,
     ) {
         let mut buffer = [0u8; 8192];
         
@@ -307,6 +310,11 @@ impl UnityMessagingClient {
             match tokio::time::timeout(Duration::from_millis(100), socket.recv_from(&mut buffer)).await {
                 Ok(Ok((bytes_received, _))) => {
                     if let Ok(message) = Message::deserialize(&buffer[..bytes_received]) {
+                        // Update last response time for any valid message
+                        if let Ok(mut time) = last_response_time.lock() {
+                            *time = Some(std::time::Instant::now());
+                        }
+                        
                         // Handle the message and potentially broadcast an event
                         if let Some(event) = Self::message_to_event(&message) {
                             if let Err(_) = event_sender.send(event) {
@@ -407,51 +415,24 @@ impl UnityMessagingClient {
         }
     }
 
-    /// Sends a ping message and waits for pong response
+    /// Checks if Unity is currently connected and responsive
+    /// 
+    /// # Arguments
+    /// 
+    /// * `timeout_seconds` - Maximum age of last response to consider Unity connected (default: 10 seconds)
     /// 
     /// # Returns
     /// 
-    /// Returns `Ok(())` if ping-pong succeeded, error otherwise
-    pub fn ping(&self) -> Result<(), UnityMessagingError> {
-        let ping_message = Message::ping();
+    /// Returns `true` if Unity has responded within the timeout period, `false` otherwise
+    pub fn is_connected(&self, timeout_seconds: Option<u64>) -> bool {
+        let timeout = Duration::from_secs(timeout_seconds.unwrap_or(10));
         
-        // Unity might send other messages first (like IsPlaying), so we need to handle multiple responses
-        self.socket.send_to(&ping_message.serialize(), self.unity_address)?;
-        
-        // Try to receive responses until we get a Pong or timeout
-        let mut attempts = 0;
-        const MAX_ATTEMPTS: usize = 5;
-        
-        while attempts < MAX_ATTEMPTS {
-            let mut buffer = [0u8; 8192];
-            match self.socket.recv_from(&mut buffer) {
-                Ok((bytes_received, _)) => {
-                    if let Ok(response) = Message::deserialize(&buffer[..bytes_received]) {
-                        match response.message_type {
-                            MessageType::Pong => return Ok(()),
-                            MessageType::IsPlaying => {
-                                println!("Unity is playing: {}", response.value);
-                                // Continue waiting for Pong
-                            },
-                            _ => {
-                                println!("Received unexpected message: {:?} with value: {}", response.message_type, response.value);
-                                // Continue waiting for Pong
-                            }
-                        }
-                    }
-                },
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut {
-                        return Err(UnityMessagingError::Timeout);
-                    } else {
-                        return Err(UnityMessagingError::IoError(e));
-                    }
-                }
+        if let Ok(last_time) = self.last_response_time.lock() {
+            if let Some(time) = *last_time {
+                return time.elapsed() <= timeout;
             }
-            attempts += 1;
         }
-        
-        Err(UnityMessagingError::InvalidMessage("No Pong response received after multiple attempts".to_string()))
+        false
     }
 
     /// Requests Unity version
@@ -488,53 +469,6 @@ impl UnityMessagingClient {
         }
     }
 
-    /// Starts listening for Unity log messages
-    /// 
-    /// This method will block and call the provided callback for each log message received.
-    /// The callback should return `true` to continue listening, `false` to stop.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `callback` - Function to call for each log message
-    pub fn listen_for_logs<F>(&self, mut callback: F) -> Result<(), UnityMessagingError>
-    where
-        F: FnMut(&Message) -> bool,
-    {
-        let mut buffer = [0u8; 8192];
-        
-        loop {
-            match self.socket.recv_from(&mut buffer) {
-                Ok((bytes_received, _)) => {
-                    if let Ok(message) = Message::deserialize(&buffer[..bytes_received]) {
-                        // Check if it's a log message
-                        match message.message_type {
-                            MessageType::Info | MessageType::Warning | MessageType::Error => {
-                                if !callback(&message) {
-                                    break;
-                                }
-                            }
-                            _ => {
-                                // Handle other message types if needed
-                                // For now, just continue listening
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    // Handle timeout or other errors
-                    if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut {
-                        // Timeout is expected, continue listening
-                        continue;
-                    } else {
-                        return Err(UnityMessagingError::IoError(e));
-                    }
-                }
-            }
-        }
-        
-        Ok(())
-    }
-
     /// Sends a refresh message to Unity to refresh the asset database
     /// 
     /// # Returns
@@ -559,336 +493,6 @@ impl Drop for UnityMessagingClient {
     }
 }
 
-/// Test utilities for Unity project management
 #[cfg(test)]
-mod test_utils {
-    use std::path::PathBuf;
-    
-    /// Gets the embedded Unity project path for testing
-    pub fn get_unity_project_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject")
-    }
-    
-    /// Creates a USS file with syntax errors to trigger Unity warnings
-    pub fn create_test_uss_file(project_path: &std::path::Path) -> std::path::PathBuf {
-        let uss_path = project_path.join("Assets").join("test_errors.uss");
-        let uss_content = r#"
-/* This USS file contains intentional syntax errors to trigger Unity warnings */
-.invalid-selector {
-    color: #invalid-color-value;
-    margin: invalid-unit;
-    unknown-property: some-value;
-}
-
-.another-invalid {
-    background-color: not-a-color
-    /* Missing semicolon above */
-    border: 1px solid;
-}
-"#;
-        std::fs::write(&uss_path, uss_content).expect("Failed to create test USS file");
-        uss_path
-    }
-    
-    /// Deletes the test USS file
-    pub fn cleanup_test_uss_file(uss_path: &std::path::Path) {
-        if uss_path.exists() {
-            std::fs::remove_file(uss_path).expect("Failed to delete test USS file");
-        }
-        
-        // Also remove the .meta file if it exists
-        let meta_path = uss_path.with_extension("uss.meta");
-        if meta_path.exists() {
-            std::fs::remove_file(meta_path).expect("Failed to delete test USS meta file");
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::unity_project_manager::UnityProjectManager;
-    use test_utils::*;
-    use std::time::Duration;
-
-    #[test]
-    fn test_message_serialization() {
-        let message = Message::new(MessageType::Ping, "test".to_string());
-        let serialized = message.serialize();
-        let deserialized = Message::deserialize(&serialized).unwrap();
-        
-        assert_eq!(message.message_type as i32, deserialized.message_type as i32);
-        assert_eq!(message.value, deserialized.value);
-    }
-
-    #[test]
-    fn test_empty_message_serialization() {
-        let message = Message::ping();
-        let serialized = message.serialize();
-        let deserialized = Message::deserialize(&serialized).unwrap();
-        
-        assert_eq!(message.message_type as i32, deserialized.message_type as i32);
-        assert_eq!(message.value, deserialized.value);
-        assert!(message.value.is_empty());
-    }
-
-    #[test]
-    fn test_port_calculation() {
-        let process_id = 12345u32;
-        let expected_port = 58000 + (process_id % 1000);
-        
-        let client = UnityMessagingClient::new(process_id).unwrap();
-        assert_eq!(client.unity_address().port(), expected_port as u16);
-    }
-
-    #[tokio::test]
-    async fn test_unity_messaging_integration() {
-        let project_path = get_unity_project_path();
-        let mut manager = match UnityProjectManager::new(project_path.to_string_lossy().to_string()).await {
-            Ok(manager) => manager,
-            Err(_) => {
-                println!("Skipping integration test: Unity project not found");
-                return;
-            }
-        };
-
-        // Update process info to check if Unity is running
-        if manager.update_process_info().await.is_err() {
-            println!("Skipping integration test: Unity Editor not running");
-            return;
-        }
-
-        let unity_process_id = manager.unity_process_id().expect("Unity process ID should be available");
-        let client = match UnityMessagingClient::new(unity_process_id) {
-            Ok(client) => client,
-            Err(e) => {
-                println!("Skipping integration test: Failed to create messaging client: {}", e);
-                return;
-            }
-        };
-
-        // Test ping-pong functionality
-        match client.ping() {
-            Ok(()) => println!("✓ Ping-pong test passed"),
-            Err(e) => {
-                println!("Ping-pong test failed: {}", e);
-                return;
-            }
-        }
-
-        // Test version retrieval
-        match client.get_version() {
-            Ok(version) => println!("✓ Unity package version: {}", version),
-            Err(e) => println!("Failed to get Unity version: {}", e),
-        }
-
-        // Test project path retrieval
-        match client.get_project_path() {
-            Ok(path) => println!("✓ Unity project path: {}", path),
-            Err(e) => println!("Failed to get Unity project path: {}", e),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_unity_event_broadcasting() {
-        let project_path = get_unity_project_path();
-        let mut manager = match UnityProjectManager::new(project_path.to_string_lossy().to_string()).await {
-            Ok(manager) => manager,
-            Err(_) => {
-                println!("Skipping event test: Unity project not found");
-                return;
-            }
-        };
-
-        // Update process info to check if Unity is running
-        if manager.update_process_info().await.is_err() {
-            println!("Skipping event test: Unity Editor not running");
-            return;
-        }
-
-        let unity_process_id = manager.unity_process_id().expect("Unity process ID should be available");
-        let mut client = match UnityMessagingClient::new(unity_process_id) {
-            Ok(client) => client,
-            Err(e) => {
-                println!("Skipping event test: Failed to create messaging client: {}", e);
-                return;
-            }
-        };
-
-        // Subscribe to events before starting the listener
-        let mut event_receiver = client.subscribe_to_events();
-
-        // Start automatic message listening
-        if let Err(e) = client.start_listening() {
-            println!("Failed to start listening: {}", e);
-            return;
-        }
-        println!("✓ Started automatic message listening");
-
-        // Create a USS file with errors to trigger Unity warnings
-        let uss_path = create_test_uss_file(&project_path);
-        println!("Created test USS file: {}", uss_path.display());
-
-        // Send refresh message to Unity
-        if let Err(e) = client.send_refresh_message() {
-            println!("Failed to send refresh message: {}", e);
-            cleanup_test_uss_file(&uss_path);
-            return;
-        }
-        println!("✓ Sent refresh message to Unity");
-
-        // Listen for events for a short time
-        println!("Listening for Unity events for 3 seconds...");
-        let start_time = std::time::Instant::now();
-        let timeout_duration = Duration::from_secs(3);
-        let mut event_count = 0;
-
-        while start_time.elapsed() < timeout_duration {
-            match tokio::time::timeout(Duration::from_millis(100), event_receiver.recv()).await {
-                Ok(Ok(event)) => {
-                    event_count += 1;
-                    match event {
-                        UnityEvent::LogMessage { level, message } => {
-                            println!("[{:?}] {}", level, message);
-                        }
-                        UnityEvent::Version(version) => {
-                            println!("[VERSION] {}", version);
-                        }
-                        UnityEvent::ProjectPath(path) => {
-                            println!("[PROJECT_PATH] {}", path);
-                        }
-                        UnityEvent::IsPlaying(playing) => {
-                            println!("[IS_PLAYING] {}", playing);
-                        }
-                        _ => {
-                            println!("[EVENT] {:?}", event);
-                        }
-                    }
-                }
-                Ok(Err(broadcast::error::RecvError::Lagged(skipped))) => {
-                    println!("Warning: Skipped {} events due to lag", skipped);
-                }
-                Ok(Err(broadcast::error::RecvError::Closed)) => {
-                    println!("Event channel closed");
-                    break;
-                }
-                Err(_) => {
-                    // Timeout, continue
-                }
-            }
-        }
-
-        println!("✓ Event listening completed. Received {} events in {} seconds", 
-                event_count, start_time.elapsed().as_secs_f32());
-
-        // Stop listening
-        client.stop_listening();
-        println!("✓ Stopped automatic message listening");
-
-        // Clean up the test file
-        cleanup_test_uss_file(&uss_path);
-        println!("✓ Cleaned up test USS file");
-    }
-
-    #[tokio::test]
-    async fn test_unity_log_generation_and_listening() {
-        let project_path = get_unity_project_path();
-        let mut manager = match UnityProjectManager::new(project_path.to_string_lossy().to_string()).await {
-            Ok(manager) => manager,
-            Err(_) => {
-                println!("Skipping log test: Unity project not found");
-                return;
-            }
-        };
-
-        // Update process info to check if Unity is running
-        if manager.update_process_info().await.is_err() {
-            println!("Skipping log test: Unity Editor not running");
-            return;
-        }
-
-        let unity_process_id = manager.unity_process_id().expect("Unity process ID should be available");
-        let client = match UnityMessagingClient::new(unity_process_id) {
-            Ok(client) => client,
-            Err(e) => {
-                println!("Skipping log test: Failed to create messaging client: {}", e);
-                return;
-            }
-        };
-
-        // Create a USS file with errors to trigger Unity warnings
-        let uss_path = create_test_uss_file(&project_path);
-        println!("Created test USS file: {}", uss_path.display());
-
-        // Send refresh message to Unity
-        if let Err(e) = client.send_refresh_message() {
-            println!("Failed to send refresh message: {}", e);
-            cleanup_test_uss_file(&uss_path);
-            return;
-        }
-        println!("✓ Sent refresh message to Unity");
-
-        // Listen for log messages with a strict timeout
-        println!("Listening for Unity log messages for 3 seconds...");
-        let mut log_count = 0;
-        let start_time = std::time::Instant::now();
-        let timeout_duration = Duration::from_secs(3);
-        
-        // Create a new socket with a short timeout for this test
-        let test_socket = match std::net::UdpSocket::bind("0.0.0.0:0") {
-            Ok(socket) => {
-                socket.set_read_timeout(Some(Duration::from_millis(100))).ok();
-                socket
-            },
-            Err(e) => {
-                println!("Failed to create test socket: {}", e);
-                cleanup_test_uss_file(&uss_path);
-                return;
-            }
-        };
-
-        // Listen for messages until timeout
-        while start_time.elapsed() < timeout_duration {
-            let mut buffer = [0u8; 8192];
-            match test_socket.recv_from(&mut buffer) {
-                Ok((bytes_received, _)) => {
-                    if let Ok(message) = Message::deserialize(&buffer[..bytes_received]) {
-                        match message.message_type {
-                            MessageType::Info | MessageType::Warning | MessageType::Error => {
-                                log_count += 1;
-                                match message.message_type {
-                                    MessageType::Info => println!("[INFO] {}", message.value),
-                                    MessageType::Warning => println!("[WARNING] {}", message.value),
-                                    MessageType::Error => println!("[ERROR] {}", message.value),
-                                    _ => {}
-                                }
-                            }
-                            _ => {
-                                // Ignore other message types
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    // Handle timeout or other errors - continue until our timeout
-                    if e.kind() != std::io::ErrorKind::WouldBlock && e.kind() != std::io::ErrorKind::TimedOut {
-                        println!("Socket error: {}", e);
-                        break;
-                    }
-                    // For timeout errors, just continue the loop
-                }
-            }
-        }
-
-        println!("✓ Log listening completed. Received {} log messages in {} seconds", 
-                log_count, start_time.elapsed().as_secs_f32());
-
-        // Clean up the test file
-        cleanup_test_uss_file(&uss_path);
-        println!("✓ Cleaned up test USS file");
-        
-        // The test passes regardless of whether we received logs or not,
-        // since Unity might not be configured to send logs via UDP
-        // This is more of an integration test to verify the mechanism works
-    }
-}
+#[path ="unity_messaging_client_tests.rs"]
+mod unity_messaging_client_tests;

@@ -3,6 +3,7 @@
 #![allow(warnings)] 
 mod unity_project_manager;
 mod unity_messaging_client;
+mod test_utils;
 
 use std::path::PathBuf;
 use unity_project_manager::UnityProjectManager;
@@ -34,25 +35,35 @@ async fn main() {
                         // Test messaging client if Unity is running
                         println!("\nTesting Unity messaging client...");
                         match UnityMessagingClient::new(pid) {
-                            Ok(client) => {
+                            Ok(mut client) => {
                                 println!("Created messaging client, Unity address: {}", client.unity_address());
                                 
-                                // Test ping-pong
-                                match client.ping() {
-                                    Ok(()) => {
-                                        println!("✓ Ping-pong test successful!");
-                                        
-                                        // Try to get version and project path
-                                        if let Ok(version) = client.get_version() {
-                                            println!("Unity package version: {}", version);
-                                        }
-                                        
-                                        if let Ok(project_path) = client.get_project_path() {
-                                            println!("Unity project path: {}", project_path);
-                                        }
-                                    },
-                                    Err(e) => println!("✗ Ping-pong test failed: {}", e),
+                                // Start listening for Unity messages to track connection status
+                                if let Err(e) = client.start_listening() {
+                                    println!("Failed to start listening: {}", e);
+                                    return;
                                 }
+                                
+                                // Wait a moment for Unity to send initial messages
+                                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                
+                                // Test connection status
+                                if client.is_connected(Some(5)) {
+                                    println!("✓ Unity connection test successful!");
+                                    
+                                    // Try to get version and project path
+                                    if let Ok(version) = client.get_version() {
+                                        println!("Unity package version: {}", version);
+                                    }
+                                    
+                                    if let Ok(project_path) = client.get_project_path() {
+                                        println!("Unity project path: {}", project_path);
+                                    }
+                                } else {
+                                    println!("✗ Unity connection test failed: No recent responses from Unity");
+                                }
+                                
+                                client.stop_listening();
                             },
                             Err(e) => println!("Failed to create messaging client: {}", e),
                         }

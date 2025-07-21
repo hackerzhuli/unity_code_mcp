@@ -22,7 +22,7 @@ This project aims to create a reliable Model Context Protocol (MCP) server that 
 
 ### Dependencies
 - `rust-mcp-sdk`: Primary MCP implementation
-- `tokio`: Async I/O runtime (automatically included)
+- `tokio`: Async I/O runtime
 
 ## Development Guidelines
 
@@ -53,6 +53,7 @@ This project aims to create a reliable Model Context Protocol (MCP) server that 
 - Unit tests for internal functionality (modules that doesn't require a running Unity Editor instance to test)
 - A real (but minimal) Unity project is embedded in `UnityProject` for running related tests (that doesn't require a running Unity Editor instance, just need files, including Unity generated files)
 - Manual tests with Unity Editor scenarios
+- Don't create examples binaries(for testing or any other reason), only do unit tests for testing
 
 ### Compatibility
 - Target stable Rust versions
