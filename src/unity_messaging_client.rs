@@ -345,9 +345,14 @@ impl UnityMessagingClient {
                     match result {
                         Ok((bytes_received, _)) => {
                             if let Ok(message) = Message::deserialize(&buffer[..bytes_received]) {
-                                // Debug logging for all received messages except Ping and Pong and logs
-                                if !matches!(message.message_type, MessageType::Ping | MessageType::Pong | MessageType::Info | MessageType::Warning | MessageType::Error) {
+                                // Debug logging for all received messages except Ping and Pong
+                                if !matches!(message.message_type, MessageType::Ping | MessageType::Pong) {
                                     println!("[DEBUG] Received Unity message: {:?} with value: '{}'", message.message_type, message.value);
+                                }
+                                
+                                // Special logging for log messages
+                                if matches!(message.message_type, MessageType::Info | MessageType::Warning | MessageType::Error) {
+                                    println!("[LOG] Unity {:?}: {}", message.message_type, message.value);
                                 }
                                 
                                 // Update last response time for any valid message
@@ -592,8 +597,8 @@ impl UnityMessagingClient {
     /// Returns `Ok(())` if the message was sent successfully
     pub async fn send_refresh_message(&self) -> Result<(), UnityMessagingError> {
         let refresh_message = Message::new(MessageType::Refresh, String::new());
-        self.socket.send_to(&refresh_message.serialize(), self.unity_address).await?;
-        Ok(())
+        println!("[DEBUG] Sending refresh message to Unity at {}", self.unity_address);
+        self.send_message_internal(&refresh_message).await
     }
 
     /// Gets the Unity address this client is connected to

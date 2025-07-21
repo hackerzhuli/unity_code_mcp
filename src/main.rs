@@ -3,6 +3,8 @@
 #![allow(warnings)] 
 mod unity_project_manager;
 mod unity_messaging_client;
+mod unity_manager;
+mod unity_manager_tests;
 mod test_utils;
 
 use std::path::PathBuf;

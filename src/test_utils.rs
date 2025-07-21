@@ -26,14 +26,21 @@ pub fn create_test_uss_file(project_path: &std::path::Path) -> std::path::PathBu
     uss_path
 }
 
-/// Deletes the test USS file
+/// Deletes the test USS file and its .meta file
 pub fn cleanup_test_uss_file(uss_path: &std::path::Path) {
     if uss_path.exists() {
         if let Err(e) = std::fs::remove_file(uss_path) {
             eprintln!("Warning: Failed to delete test USS file: {}", e);
         }
     }
-    // Note: Unity will automatically handle .meta file deletion
+    
+    // Also delete the .meta file to ensure Unity recognizes the change
+    let meta_path = uss_path.with_extension("uss.meta");
+    if meta_path.exists() {
+        if let Err(e) = std::fs::remove_file(&meta_path) {
+            eprintln!("Warning: Failed to delete test USS .meta file: {}", e);
+        }
+    }
 }
 
 /// Creates a C# script to trigger Unity compilation
@@ -69,12 +76,19 @@ namespace UnityProject
     cs_path
 }
 
-/// Deletes the test C# script
+/// Deletes the test C# script and its .meta file
 pub fn cleanup_test_cs_script(cs_path: &std::path::Path) {
     if cs_path.exists() {
         if let Err(e) = std::fs::remove_file(cs_path) {
             eprintln!("Warning: Failed to delete test C# script: {}", e);
         }
     }
-    // Note: Unity will automatically handle .meta file deletion
+    
+    // Also delete the .meta file to ensure Unity recognizes the change
+    let meta_path = cs_path.with_extension("cs.meta");
+    if meta_path.exists() {
+        if let Err(e) = std::fs::remove_file(&meta_path) {
+            eprintln!("Warning: Failed to delete test C# script .meta file: {}", e);
+        }
+    }
 }
