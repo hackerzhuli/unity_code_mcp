@@ -81,14 +81,14 @@ async fn test_unity_messaging_integration() {
 
     // Test version retrieval
     match client.get_version().await {
-        Ok(version) => println!("✓ Unity package version: {}", version),
-        Err(e) => println!("Failed to get Unity version: {}", e),
+        Ok(_) => println!("✓ Version request sent successfully"),
+        Err(e) => println!("Failed to send version request: {}", e),
     }
 
     // Test project path retrieval
     match client.get_project_path().await {
-        Ok(path) => println!("✓ Unity project path: {}", path),
-        Err(e) => println!("Failed to get Unity project path: {}", e),
+        Ok(_) => println!("✓ Project path request sent successfully"),
+        Err(e) => println!("Failed to send project path request: {}", e),
     }
 }
 
@@ -141,7 +141,7 @@ async fn test_unity_log_generation_and_listening() {
 
     // Test basic connectivity first with a ping
     println!("Testing Unity connectivity with ping...");
-    match client.send_message(&Message::ping(), false, None).await {
+    match client.send_message(&Message::ping(), None).await {
         Ok(_) => println!("✓ Ping sent successfully"),
         Err(e) => {
             println!("⚠ Failed to send ping to Unity: {}", e);
@@ -268,7 +268,19 @@ async fn test_unity_online_offline_state() {
     let initial_state = client.is_online();
 
     // Wait for ping response to set Unity online
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    let start_time = std::time::Instant::now();
+    let mut unity_online = false;
+    while start_time.elapsed() < Duration::from_millis(500) {
+        if client.is_online() {
+            unity_online = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    
+    if !unity_online {
+        println!("[TEST] Warning: Unity didn't come online after initial ping");
+    }
 
     // Create a C# script to trigger Unity compilation (which will make Unity go offline)
     let cs_script_path = create_test_cs_script(&project_path);
@@ -279,29 +291,44 @@ async fn test_unity_online_offline_state() {
         .expect("Failed to send refresh message");
     println!("[TEST] Sent refresh message to trigger compilation (timestamp: {:?})", std::time::Instant::now());
 
-    // Wait for Unity to send offline message and disconnect during compilation
-    // We need to wait longer to ensure the offline detection has time to occur
-    println!("[TEST] Waiting 3000ms for Unity to start compilation (timestamp: {:?})", std::time::Instant::now());
-    tokio::time::sleep(Duration::from_millis(3000)).await;
-    println!("[TEST] Finished waiting, now checking state (timestamp: {:?})", std::time::Instant::now());
-
-    // Check Unity state during compilation (should be offline)
-    let state_during_compilation = client.is_online();
-    println!("[TEST] Unity state during compilation: {} (timestamp: {:?})", state_during_compilation, std::time::Instant::now());
-
-    // The important thing is that our state tracking mechanism is working
-    // We've verified that Unity was online after the initial ping
-
-    // Wait for compilation to finish (give it more time for Unity to restart)
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    // Poll for Unity to go offline (should happen within 5 seconds)
+    let compilation_start_time = std::time::Instant::now();
+    let mut state_during_compilation = true;
+    let mut unity_went_offline = false;
     
-    // Note: After Unity goes offline, the socket connection is closed.
-    // We cannot send messages to Unity until it comes back online and
-    // re-establishes the connection. The listener task will detect when
-    // Unity comes back online through its periodic ping mechanism.
+    println!("[TEST] Polling for Unity to go offline during compilation...");
+    while compilation_start_time.elapsed() < Duration::from_secs(5) {
+        if !client.is_online() {
+            state_during_compilation = false;
+            unity_went_offline = true;
+            println!("[TEST] Unity went offline after {:?} (timestamp: {:?})", compilation_start_time.elapsed(), std::time::Instant::now());
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     
-    let final_online_state = client.is_online();
-    println!("Unity state after waiting for compilation: {}", final_online_state);
+    if !unity_went_offline {
+        println!("[TEST] Warning: Unity didn't go offline within 5 seconds of compilation trigger");
+        state_during_compilation = client.is_online();
+    }
+
+    // Poll for Unity to come back online (should happen within 10 seconds after going offline)
+    let mut final_online_state = false;
+    let online_poll_start = std::time::Instant::now();
+    
+    println!("[TEST] Polling for Unity to come back online...");
+    while online_poll_start.elapsed() < Duration::from_secs(10) {
+        if client.is_online() {
+            final_online_state = true;
+            println!("[TEST] Unity came back online after {:?} (timestamp: {:?})", online_poll_start.elapsed(), std::time::Instant::now());
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    
+    if !final_online_state {
+        println!("[TEST] Warning: Unity didn't come back online within 10 seconds");
+    }
 
     // Clean up the test file
     cleanup_test_cs_script(&cs_script_path);
@@ -311,15 +338,43 @@ async fn test_unity_online_offline_state() {
     if let Err(e) = client.send_refresh_message().await {
         println!("Warning: Failed to send second refresh message after cleanup: {}", e);
     } else {
-        // Wait for Unity to complete the second compilation cycle
-        tokio::time::sleep(Duration::from_secs(6)).await;
+        println!("[TEST] Sent second refresh message for cleanup compilation");
+        
+        // Poll for Unity to go offline for second compilation (within 5 seconds)
+        let second_compilation_start = std::time::Instant::now();
+        let mut second_offline_detected = false;
+        
+        while second_compilation_start.elapsed() < Duration::from_secs(5) {
+            if !client.is_online() {
+                second_offline_detected = true;
+                println!("[TEST] Unity went offline for second compilation after {:?}", second_compilation_start.elapsed());
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        
+        if second_offline_detected {
+            // Poll for Unity to come back online after second compilation (within 10 seconds)
+            let second_online_poll_start = std::time::Instant::now();
+            
+            while second_online_poll_start.elapsed() < Duration::from_secs(10) {
+                if client.is_online() {
+                    println!("[TEST] Unity came back online after second compilation after {:?}", second_online_poll_start.elapsed());
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        } else {
+            println!("[TEST] Warning: Unity didn't go offline for second compilation, waiting 2 seconds as fallback");
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
     }
 
     // Stop listening
     client.stop_listening();
 
     // Assert that the online/offline state tracking worked correctly throughout the test
-    assert!(initial_state, "Unity should have been online after initial ping");
+    assert!(unity_online, "Unity should have been online after initial ping");
     
     // After completing both compilation rounds, assert on the stored boolean values
     // This validates that our offline detection mechanism worked correctly
@@ -329,4 +384,215 @@ async fn test_unity_online_offline_state() {
     
     // Note: We don't assert that Unity comes back online immediately after compilation
     // because the timing can vary and Unity might still be restarting its messaging system
+}
+
+#[tokio::test]
+async fn test_send_message_with_stable_delivery() {
+    let project_path = get_unity_project_path();
+    let mut manager = match UnityProjectManager::new(project_path.to_string_lossy().to_string()).await {
+        Ok(manager) => manager,
+        Err(_) => {
+            println!("Skipping stable delivery test: Unity project not found");
+            return;
+        }
+    };
+
+    // Update process info to check if Unity is running
+    if manager.update_process_info().await.is_err() {
+        println!("Skipping stable delivery test: Unity Editor not running");
+        return;
+    }
+
+    let unity_process_id = match manager.unity_process_id() {
+        Some(pid) => pid,
+        None => {
+            println!("Skipping stable delivery test: Unity is not running");
+            return;
+        }
+    };
+    
+    let mut client = UnityMessagingClient::new(unity_process_id).await
+        .expect("Failed to create messaging client");
+
+    // Subscribe to events BEFORE starting listener to avoid missing messages
+    let mut event_receiver = client.subscribe_to_events();
+
+    // Start listening for Unity events
+    client.start_listening().await
+        .expect("Failed to start listening");
+    
+    // Give the listener task a moment to start up and establish connection
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    
+    // Test 1: Try different request types to see what Unity responds to
+    println!("[TEST] Testing different request types when Unity is online...");
+    println!("[DEBUG] Unity online status before request: {}", client.is_online());
+    
+    // Try sending a ping first to see if Unity responds
+    println!("[TEST] Sending ping...");
+    match client.send_ping().await {
+        Ok(_) => println!("✓ Ping sent successfully"),
+        Err(e) => println!("Failed to send ping: {}", e)
+    }
+    
+    // Wait a moment and check for pong
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    
+    // Try version request
+    println!("[TEST] Sending version request...");
+    match client.get_version().await {
+        Ok(_) => println!("✓ Version request sent successfully"),
+        Err(e) => println!("Failed to send version request: {}", e)
+    }
+    
+    // Try project path request
+    println!("[TEST] Sending project path request...");
+    match client.get_project_path().await {
+        Ok(_) => {
+            println!("✓ Project path request sent successfully");
+            
+            // Wait for any response events (Version or ProjectPath)
+             let timeout = tokio::time::timeout(Duration::from_secs(10), async {
+                 let mut version_received = false;
+                 let mut project_path_received = false;
+                 
+                 loop {
+                     match event_receiver.recv().await {
+                         Ok(UnityEvent::Version(version)) => {
+                             println!("✓ Received version response: {}", version);
+                             version_received = true;
+                         },
+                         Ok(UnityEvent::ProjectPath(path)) => {
+                             println!("✓ Received project path response: {}", path);
+                             project_path_received = true;
+                         },
+                         Ok(event) => {
+                             println!("[DEBUG] Received other event: {:?}", event);
+                         },
+                         Err(e) => {
+                             println!("[DEBUG] Event receiver error: {:?}", e);
+                             break;
+                         }
+                     }
+                     
+                     // If we received both responses or waited long enough, break
+                     if version_received && project_path_received {
+                         break;
+                     }
+                 }
+                 
+                 (version_received, project_path_received)
+             }).await;
+             
+             match timeout {
+                 Ok((version_received, project_path_received)) => {
+                     println!("Results: Version received: {}, ProjectPath received: {}", version_received, project_path_received);
+                     if !version_received && !project_path_received {
+                         println!("No responses received from Unity - this suggests Unity may not be responding to requests");
+                     }
+                 },
+                 Err(_) => {
+                     println!("Timeout waiting for responses from Unity");
+                 }
+             }
+        },
+        Err(e) => {
+            println!("Failed to send version request when Unity is online: {}", e);
+            client.stop_listening();
+            return;
+        }
+    }
+
+    // Test 2: Create a C# script to trigger Unity compilation (making Unity go offline)
+    println!("[TEST] Creating C# script to trigger compilation...");
+    let cs_script_path = create_test_cs_script(&project_path);
+
+    // Send refresh message to Unity to trigger compilation
+    println!("[TEST] Sending refresh message to trigger compilation...");
+    client.send_refresh_message().await
+        .expect("Failed to send refresh message");
+
+    // Wait for Unity to go offline during compilation
+    println!("[TEST] Waiting for Unity to go offline during compilation...");
+    let mut offline_detected = false;
+    for _ in 0..50 { // Wait up to 5 seconds
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if !client.is_online() {
+            offline_detected = true;
+            println!("✓ Unity went offline during compilation");
+            break;
+        }
+    }
+
+    if !offline_detected {
+        println!("Warning: Unity didn't go offline during compilation, test may not be fully valid");
+    }
+
+    // Test 3: Send get_version when Unity is offline and verify we receive a response
+    // This should wait for Unity to come back online before sending
+    println!("[TEST] Sending get_version while Unity is offline (should wait for Unity to come back online)...");
+    let start_time = std::time::Instant::now();
+    
+    match client.get_version().await {
+        Ok(_) => {
+            let elapsed = start_time.elapsed();
+            println!("✓ Successfully sent version request after waiting {:.2}s for Unity to come back online", elapsed.as_secs_f32());
+            
+            // Verify it took some time (indicating it waited)
+            if offline_detected {
+                assert!(elapsed.as_secs() >= 1, "Should have waited at least 1 second for Unity to come back online");
+            }
+            
+            // Wait for the Version response event
+             let timeout = tokio::time::timeout(Duration::from_secs(5), async {
+                 loop {
+                     match event_receiver.recv().await {
+                         Ok(UnityEvent::Version(version)) => {
+                             println!("✓ Received version response after Unity came back online: {}", version);
+                             return true;
+                         },
+                         Ok(event) => {
+                             println!("[DEBUG] Received other event: {:?}", event);
+                             continue; // Ignore other events but log them
+                         },
+                         Err(e) => {
+                             println!("[DEBUG] Event receiver error: {:?}", e);
+                             return false;
+                         }
+                     }
+                 }
+             }).await;
+             
+             match timeout {
+                 Ok(true) => println!("✓ Version response verified after Unity came back online"),
+                 _ => {
+                     println!("Failed to receive version response within timeout after Unity came back online");
+                     cleanup_test_cs_script(&cs_script_path);
+                     client.stop_listening();
+                     panic!("Should have received version response after Unity came back online");
+                 }
+             }
+        },
+        Err(e) => {
+            println!("Failed to send version request after waiting for Unity: {}", e);
+            cleanup_test_cs_script(&cs_script_path);
+            client.stop_listening();
+            panic!("get_version should have succeeded after waiting for Unity to come back online");
+        }
+    }
+
+    // Clean up the test file
+    cleanup_test_cs_script(&cs_script_path);
+
+    // Send another refresh message to clean up
+    if let Err(e) = client.send_refresh_message().await {
+        println!("Warning: Failed to send cleanup refresh message: {}", e);
+    } else {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+
+    // Stop listening
+    client.stop_listening();
+
+    println!("✓ Stable delivery test completed successfully");
 }

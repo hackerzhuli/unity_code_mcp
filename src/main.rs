@@ -54,13 +54,14 @@ async fn main() {
                                     // Check Unity online status
                                     println!("Unity online status: {}", client.is_online());
                                     
-                                    // Try to get version and project path
-                                    if let Ok(version) = client.get_version().await {
-                                        println!("Unity package version: {}", version);
+                                    // Request Unity version (response will come via events)
+                                    if let Ok(_) = client.get_version().await {
+                                        println!("Version request sent successfully");
                                     }
                                     
-                                    if let Ok(project_path) = client.get_project_path().await {
-                                        println!("Unity project path: {}", project_path);
+                                    // Request Unity project path (response will come via events)
+                                    if let Ok(_) = client.get_project_path().await {
+                                        println!("Project path request sent successfully");
                                     }
                                 } else {
                                     println!("✗ Unity connection test failed: No recent responses from Unity");

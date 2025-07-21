@@ -1,8 +1,11 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::net::UdpSocket;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
-use tokio::net::UdpSocket;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 /// Message types as defined in the Unity Package Messaging Protocol
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,7 +211,7 @@ pub enum UnityMessagingError {
 
 /// Unity messaging client that communicates via UDP with event broadcasting
 pub struct UnityMessagingClient {
-    socket: tokio::net::UdpSocket,
+    socket: Arc<tokio::net::UdpSocket>,
     unity_address: SocketAddr,
     _timeout_duration: Duration,
     event_sender: broadcast::Sender<UnityEvent>,
@@ -233,7 +236,7 @@ impl UnityMessagingClient {
         let unity_address = SocketAddr::from(([127, 0, 0, 1], unity_port as u16));
 
         // Create UDP socket using tokio
-        let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?; // Bind to any available port
+        let socket = Arc::new(tokio::net::UdpSocket::bind("0.0.0.0:0").await?); // Bind to any available port
 
         // Create broadcast channel for events
         let (event_sender, _event_receiver) = broadcast::channel(1000);
@@ -263,8 +266,8 @@ impl UnityMessagingClient {
             return Ok(()); // Already listening
         }
 
-        // Create a new socket for the background task (since we can't clone tokio sockets)
-        let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
+        // Use the shared socket for the background task
+        let socket = Arc::clone(&self.socket);
         let unity_address = self.unity_address;
         let event_sender = self.event_sender.clone();
         let last_response_time = self.last_response_time.clone();
@@ -297,7 +300,7 @@ impl UnityMessagingClient {
 
     /// Background task that listens for Unity messages and broadcasts events
     async fn message_listener_task(
-        socket: UdpSocket,
+        socket: Arc<UdpSocket>,
         unity_address: SocketAddr,
         event_sender: broadcast::Sender<UnityEvent>,
         last_response_time: std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>,
@@ -342,6 +345,11 @@ impl UnityMessagingClient {
                     match result {
                         Ok((bytes_received, _)) => {
                             if let Ok(message) = Message::deserialize(&buffer[..bytes_received]) {
+                                // Debug logging for all received messages except Ping and Pong
+                                if !matches!(message.message_type, MessageType::Ping | MessageType::Pong) {
+                                    println!("[DEBUG] Received Unity message: {:?} with value: '{}'", message.message_type, message.value);
+                                }
+                                
                                 // Update last response time for any valid message
                                 if let Ok(mut time) = last_response_time.lock() {
                                     *time = Some(std::time::Instant::now());
@@ -351,13 +359,13 @@ impl UnityMessagingClient {
                                 match message.message_type {
                                     MessageType::Online => {
                                         if let Ok(mut online) = is_online.lock() {
-                                            println!("[CLIENT] Received Online message, setting state to true (timestamp: {:?})", std::time::Instant::now());
+                                            //println!("[CLIENT] Received Online message, setting state to true (timestamp: {:?})", std::time::Instant::now());
                                             *online = true;
                                         }
                                     }
                                     MessageType::Offline => {
                                         if let Ok(mut online) = is_online.lock() {
-                                            println!("[CLIENT] Received Offline message, setting state to false (timestamp: {:?})", std::time::Instant::now());
+                                            //println!("[CLIENT] Received Offline message, setting state to false (timestamp: {:?})", std::time::Instant::now());
                                             *online = false;
                                         }
                                     }
@@ -446,92 +454,79 @@ impl UnityMessagingClient {
         }
     }
 
-    /// Sends a message to Unity and optionally waits for a response (internal use)
+    /// Sends a message to Unity (internal use)
     /// 
     /// # Arguments
     /// 
     /// * `message` - The message to send
-    /// * `expect_response` - Whether to wait for a response
     /// 
     /// # Returns
     /// 
-    /// Returns the response message if `expect_response` is true, otherwise None
-    async fn send_message_internal(&self, message: &Message, expect_response: bool) -> Result<Option<Message>, UnityMessagingError> {
+    /// Returns `Ok(())` if the message was sent successfully
+    async fn send_message_internal(&self, message: &Message) -> Result<(), UnityMessagingError> {
+        // Debug logging for outgoing messages except Ping and Pong
+        if !matches!(message.message_type, MessageType::Ping | MessageType::Pong) {
+            println!("[DEBUG] Sending Unity message: {:?} with value: '{}'", message.message_type, message.value);
+        }
+        
         // Serialize and send the message
         let data = message.serialize();
         match self.socket.send_to(&data, self.unity_address).await {
-            Ok(_) => {},
+            Ok(_) => Ok(()),
             Err(e) => {
                 // Mark Unity as offline when send fails
                 if let Ok(mut online) = self.is_online.lock() {
                     *online = false;
                 }
-                return Err(e.into());
+                Err(e.into())
             }
         }
+    }
 
-        if expect_response {
-            // Wait for response with timeout
-            let mut buffer = [0u8; 8192]; // 8KB buffer as per protocol
-            match tokio::time::timeout(
-                Duration::from_secs(5),
-                self.socket.recv_from(&mut buffer)
-            ).await {
-                Ok(Ok((bytes_received, _))) => {
-                    let response = Message::deserialize(&buffer[..bytes_received])?;
-                    Ok(Some(response))
-                },
-                Ok(Err(e)) => {
-                    // Mark Unity as offline when receive fails
-                    if let Ok(mut online) = self.is_online.lock() {
-                        *online = false;
-                    }
-                    Err(e.into())
-                },
-                Err(_) => {
-                    // Mark Unity as offline on timeout
-                    if let Ok(mut online) = self.is_online.lock() {
-                        *online = false;
-                    }
-                    Err(UnityMessagingError::Timeout)
-                }
-            }
-        } else {
-            Ok(None)
+    /// Determines if a message type requires stable delivery (should wait for Unity to be online)
+    fn requires_stable_delivery(message_type: MessageType) -> bool {
+        match message_type {
+            // Messages that can be sent immediately (don't require stable delivery)
+            MessageType::Ping | MessageType::Pong | MessageType::Refresh => false,
+            
+            // All other messages require stable delivery
+            _ => true,
         }
     }
 
     /// Sends a message to Unity with automatic waiting for Unity to be online
     /// 
-    /// This method will wait for Unity to be online before sending the message.
-    /// If Unity is not online, it will poll the online status until Unity comes online
-    /// or the timeout is reached.
+    /// This method will wait for Unity to be online before sending the message,
+    /// but only for messages that require stable delivery. Messages like Ping, Pong,
+    /// and Refresh are sent immediately regardless of Unity's online status.
     /// 
     /// # Arguments
     /// 
     /// * `message` - The message to send
-    /// * `expect_response` - Whether to wait for a response
     /// * `timeout_seconds` - Maximum time to wait for Unity to be online (default: 30 seconds)
     /// 
     /// # Returns
     /// 
-    /// Returns the response message if `expect_response` is true, otherwise None
-    pub async fn send_message(&self, message: &Message, expect_response: bool, timeout_seconds: Option<u64>) -> Result<Option<Message>, UnityMessagingError> {
-        let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30));
-        let start_time = std::time::Instant::now();
-        
-        // Wait for Unity to be online
-        while !self.is_online() {
-            if start_time.elapsed() >= timeout {
-                return Err(UnityMessagingError::Timeout);
-            }
+    /// Returns `Ok(())` if the message was sent successfully
+    pub async fn send_message(&self, message: &Message, timeout_seconds: Option<u64>) -> Result<(), UnityMessagingError> {
+        // Check if this message type requires stable delivery
+        if Self::requires_stable_delivery(message.message_type) {
+            let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30));
+            let start_time = std::time::Instant::now();
             
-            // Sleep for a short time before checking again
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            // Wait for Unity to be online
+            while !self.is_online() {
+                if start_time.elapsed() >= timeout {
+                    return Err(UnityMessagingError::Timeout);
+                }
+                
+                // Sleep for a short time before checking again
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
         }
         
-        // Unity is online, send the message
-        self.send_message_internal(message, expect_response).await
+        // Send the message (either immediately or after Unity is online)
+        self.send_message_internal(message).await
     }
 
     /// Checks if Unity is currently connected and responsive
@@ -556,36 +551,38 @@ impl UnityMessagingClient {
 
     /// Requests Unity version
     /// 
+    /// This method sends a version request to Unity. The response will be available
+    /// through the event system as a Version event.
+    /// 
     /// # Returns
     /// 
-    /// Returns the Unity package version string
-    pub async fn get_version(&self) -> Result<String, UnityMessagingError> {
+    /// Returns `Ok(())` if the request was sent successfully
+    pub async fn get_version(&self) -> Result<(), UnityMessagingError> {
         let version_message = Message::new(MessageType::Version, String::new());
-        
-        match self.send_message(&version_message, true, None).await? {
-            Some(response) if response.message_type == MessageType::Version => Ok(response.value),
-            Some(response) => Err(UnityMessagingError::InvalidMessage(
-                format!("Expected Version response, got {:?}", response.message_type)
-            )),
-            None => Err(UnityMessagingError::InvalidMessage("No response received".to_string())),
-        }
+        self.send_message(&version_message, None).await
     }
 
     /// Requests Unity project path
     /// 
+    /// This method sends a project path request to Unity. The response will be available
+    /// through the event system as a ProjectPath event.
+    /// 
     /// # Returns
     /// 
-    /// Returns the Unity project path
-    pub async fn get_project_path(&self) -> Result<String, UnityMessagingError> {
+    /// Returns `Ok(())` if the request was sent successfully
+    pub async fn get_project_path(&self) -> Result<(), UnityMessagingError> {
         let project_path_message = Message::new(MessageType::ProjectPath, String::new());
-        
-        match self.send_message(&project_path_message, true, None).await? {
-            Some(response) if response.message_type == MessageType::ProjectPath => Ok(response.value),
-            Some(response) => Err(UnityMessagingError::InvalidMessage(
-                format!("Expected ProjectPath response, got {:?}", response.message_type)
-            )),
-            None => Err(UnityMessagingError::InvalidMessage("No response received".to_string())),
-        }
+        self.send_message(&project_path_message, None).await
+    }
+
+    /// Sends a ping message to Unity
+    /// 
+    /// # Returns
+    /// 
+    /// Returns `Ok(())` if the ping was sent successfully
+    pub async fn send_ping(&self) -> Result<(), UnityMessagingError> {
+        let ping_message = Message::ping();
+        self.send_message_internal(&ping_message).await
     }
 
     /// Sends a refresh message to Unity to refresh the asset database
