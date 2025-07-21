@@ -1,3 +1,6 @@
+// Allow warnings, so we don't see so many warnings everytime we run tests or build
+// We will clean up warnings once in a while
+#![allow(warnings)] 
 mod unity_project_manager;
 mod unity_messaging_client;
 

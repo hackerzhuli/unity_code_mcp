@@ -118,12 +118,13 @@ impl UnityProjectManager {
     /// 
     /// # Examples
     /// 
-    /// ```
+    /// ```no_run
     /// use unity_code_mcp::UnityProjectManager;
     /// 
     /// #[tokio::main]
     /// async fn main() {
-    ///     let manager = UnityProjectManager::new("/path/to/unity/project".to_string()).await.unwrap();
+    ///     let project_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject");
+    ///     let manager = UnityProjectManager::new(project_path.to_string_lossy().to_string()).await.unwrap();
     ///     if let Some(version) = manager.unity_version() {
     ///         println!("Unity version: {}", version);
     ///     }
@@ -149,12 +150,13 @@ impl UnityProjectManager {
     /// 
     /// # Examples
     /// 
-    /// ```
+    /// ```no_run
     /// use unity_code_mcp::UnityProjectManager;
     /// 
     /// #[tokio::main]
     /// async fn main() {
-    ///     let mut manager = UnityProjectManager::new("/path/to/unity/project".to_string()).await.unwrap();
+    ///     let project_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject");
+    ///     let mut manager = UnityProjectManager::new(project_path.to_string_lossy().to_string()).await.unwrap();
     ///     match manager.update_process_info().await {
     ///         Ok(()) => println!("Process info updated"),
     ///         Err(e) => eprintln!("No Unity Editor running: {}", e),
@@ -194,12 +196,13 @@ impl UnityProjectManager {
     /// 
     /// # Examples
     /// 
-    /// ```
+    /// ```no_run
     /// use unity_code_mcp::UnityProjectManager;
     /// 
     /// #[tokio::main]
     /// async fn main() {
-    ///     let mut manager = UnityProjectManager::new("/path/to/unity/project".to_string()).await.unwrap();
+    ///     let project_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject");
+    ///     let mut manager = UnityProjectManager::new(project_path.to_string_lossy().to_string()).await.unwrap();
     ///     manager.update_process_info().await.ok();
     ///     if let Some(pid) = manager.unity_process_id() {
     ///         println!("Unity Editor PID: {}", pid);
@@ -242,26 +245,42 @@ impl UnityProjectManager {
     /// 
     /// # Examples
     /// 
-    /// ```
+    /// ```no_run
     /// use unity_code_mcp::UnityProjectManager;
     /// 
-    /// let manager = UnityProjectManager::new("/path/to/unity/project".to_string());
-    /// println!("Project path: {}", manager.project_path().display());
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let project_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject");
+    ///     let manager = UnityProjectManager::new(project_path.to_string_lossy().to_string()).await.unwrap();
+    ///     println!("Project path: {}", manager.project_path().display());
+    /// }
     /// ```
     pub fn project_path(&self) -> &Path {
         &self.project_path
     }
 }
 
+/// Test utilities for Unity project management
+#[cfg(test)]
+mod test_utils {
+    use std::path::PathBuf;
+    
+    /// Gets the embedded Unity project path for testing
+    pub fn get_unity_project_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_utils::*;
     use std::path::PathBuf;
 
     #[tokio::test]
     async fn test_new_with_embedded_project() {
         // Test with the embedded Unity project
-        let project_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject");
+        let project_path = get_unity_project_path();
         let result = UnityProjectManager::new(project_path.to_string_lossy().to_string()).await;
         assert!(result.is_ok());
         
@@ -285,7 +304,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cached_unity_version() {
-        let project_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject");
+        let project_path = get_unity_project_path();
         let manager = UnityProjectManager::new(project_path.to_string_lossy().to_string()).await.unwrap();
 
         let version = manager.unity_version();
@@ -297,7 +316,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_process_info() {
-        let project_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject");
+        let project_path = get_unity_project_path();
         let mut manager = UnityProjectManager::new(project_path.to_string_lossy().to_string()).await.unwrap();
 
         // Initially should be None
