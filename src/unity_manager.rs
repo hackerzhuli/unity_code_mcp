@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{VecDeque, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tokio::sync::{mpsc, broadcast};
@@ -7,18 +7,18 @@ use tokio::time::timeout;
 use crate::unity_messaging_client::{UnityMessagingClient, UnityEvent, UnityMessagingError};
 use crate::unity_project_manager::UnityProjectManager;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnityLogEntry {
     pub timestamp: SystemTime,
     pub level: String,
     pub message: String,
-    pub stack_trace: Option<String>,
 }
 
 pub struct UnityManager {
     messaging_client: Option<UnityMessagingClient>,
     project_manager: UnityProjectManager,
     logs: Arc<Mutex<VecDeque<UnityLogEntry>>>,
+    seen_logs: Arc<Mutex<HashSet<String>>>,
     max_logs: usize,
     event_receiver: Option<broadcast::Receiver<UnityEvent>>,
     is_listening: bool,
@@ -33,6 +33,7 @@ impl UnityManager {
             messaging_client: None,
             project_manager,
             logs: Arc::new(Mutex::new(VecDeque::new())),
+            seen_logs: Arc::new(Mutex::new(HashSet::new())),
             max_logs: 1000, // Keep last 1000 log entries
             event_receiver: None,
             is_listening: false,
@@ -68,6 +69,7 @@ impl UnityManager {
     /// Start collecting logs from Unity events with a specific receiver
     async fn start_log_collection_with_receiver(&mut self, mut event_receiver: broadcast::Receiver<UnityEvent>) {
         let logs = Arc::clone(&self.logs);
+        let seen_logs = Arc::clone(&self.seen_logs);
         let max_logs = self.max_logs;
         
         tokio::spawn(async move {
@@ -78,24 +80,37 @@ impl UnityManager {
                         println!("[DEBUG] Log collection received event: {:?}", event);
                         match event {
                             UnityEvent::LogMessage { level, message } => {
-                                let log_entry = UnityLogEntry {
-                                    timestamp: SystemTime::now(),
-                                    level: format!("{:?}", level), // Convert LogLevel enum to string
-                                    message: message.clone(),
-                                    stack_trace: None, // LogMessage doesn't include stack trace
+                                // Create a unique key for deduplication (message only)
+                                let log_key = message.clone();
+                                
+                                // Check if we've already seen this exact log
+                                let is_duplicate = if let Ok(mut seen_guard) = seen_logs.lock() {
+                                    !seen_guard.insert(log_key)
+                                } else {
+                                    false
                                 };
                                 
-                                println!("[DEBUG] Adding log entry: [{}] {}", log_entry.level, log_entry.message);
-                                
-                                if let Ok(mut logs_guard) = logs.lock() {
-                                    logs_guard.push_back(log_entry);
+                                if !is_duplicate {
+                                    let log_entry = UnityLogEntry {
+                                        timestamp: SystemTime::now(),
+                                        level: format!("{:?}", level), // Convert LogLevel enum to string
+                                        message: message.clone(),
+                                    };
                                     
-                                    // Keep only the last max_logs entries
-                                    while logs_guard.len() > max_logs {
-                                        logs_guard.pop_front();
+                                    println!("[DEBUG] Adding log entry: [{}] {}", log_entry.level, log_entry.message);
+                                    
+                                    if let Ok(mut logs_guard) = logs.lock() {
+                                        logs_guard.push_back(log_entry);
+                                        
+                                        // Keep only the last max_logs entries
+                                        while logs_guard.len() > max_logs {
+                                            logs_guard.pop_front();
+                                        }
+                                        
+                                        println!("[DEBUG] Total logs now: {}", logs_guard.len());
                                     }
-                                    
-                                    println!("[DEBUG] Total logs now: {}", logs_guard.len());
+                                } else {
+                                    println!("[DEBUG] Skipping duplicate log: [{}] {}", format!("{:?}", level), message);
                                 }
                             },
                             _ => {
@@ -128,22 +143,15 @@ impl UnityManager {
         }
     }
 
-    /// Get logs filtered by level
-    pub fn get_logs_by_level(&self, level: &str) -> Vec<UnityLogEntry> {
-        if let Ok(logs_guard) = self.logs.lock() {
-            logs_guard.iter()
-                .filter(|log| log.level.eq_ignore_ascii_case(level))
-                .cloned()
-                .collect()
-        } else {
-            Vec::new()
-        }
-    }
+
 
     /// Clear all collected logs
     pub fn clear_logs(&self) {
         if let Ok(mut logs_guard) = self.logs.lock() {
             logs_guard.clear();
+        }
+        if let Ok(mut seen_guard) = self.seen_logs.lock() {
+            seen_guard.clear();
         }
     }
 
@@ -230,23 +238,7 @@ impl UnityManager {
         }
     }
 
-    /// Wait for logs with a specific level to appear
-    pub async fn wait_for_logs(&self, level: &str, timeout_duration: Duration) -> Result<Vec<UnityLogEntry>, Box<dyn std::error::Error + Send + Sync>> {
-        let start_time = SystemTime::now();
-        
-        loop {
-            let logs = self.get_logs_by_level(level);
-            if !logs.is_empty() {
-                return Ok(logs);
-            }
-            
-            if start_time.elapsed().unwrap_or(Duration::ZERO) >= timeout_duration {
-                return Err(format!("Timeout waiting for {} logs", level).into());
-            }
-            
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    }
+
 
     /// Stop the messaging client and cleanup
     pub fn shutdown(&mut self) {
