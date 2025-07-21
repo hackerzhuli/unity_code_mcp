@@ -51,6 +51,7 @@ This project aims to create a reliable Model Context Protocol (MCP) server that 
 
 ### Testing Strategy
 - Unit tests for internal functionality (modules that doesn't require a running Unity Editor instance to test)
+- A real (but minimal) Unity project is embedded in `UnityProject` for running related tests (that doesn't require a running Unity Editor instance, just need files, including Unity generated files)
 - Manual tests with Unity Editor scenarios
 
 ### Compatibility
