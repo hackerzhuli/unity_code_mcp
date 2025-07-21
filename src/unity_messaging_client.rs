@@ -169,7 +169,7 @@ pub enum UnityEvent {
     /// Test run started
     TestRunStarted,
     /// Test run finished
-    TestRunFinished,
+    TestRunFinished(String),
     /// Test started
     TestStarted(String),
     /// Test finished
@@ -443,7 +443,7 @@ impl UnityMessagingClient {
             
             // Test messages
             MessageType::TestRunStarted => Some(UnityEvent::TestRunStarted),
-            MessageType::TestRunFinished => Some(UnityEvent::TestRunFinished),
+            MessageType::TestRunFinished => Some(UnityEvent::TestRunFinished(message.value.clone())),
             MessageType::TestStarted => Some(UnityEvent::TestStarted(message.value.clone())),
             MessageType::TestFinished => Some(UnityEvent::TestFinished(message.value.clone())),
             MessageType::TestListRetrieved => Some(UnityEvent::TestListRetrieved(message.value.clone())),
@@ -599,6 +599,40 @@ impl UnityMessagingClient {
         let refresh_message = Message::new(MessageType::Refresh, String::new());
         println!("[DEBUG] Sending refresh message to Unity at {}", self.unity_address);
         self.send_message_internal(&refresh_message).await
+    }
+
+    /// Requests the list of available tests for the specified test mode
+    /// 
+    /// This method sends a test list request to Unity. The response will be available
+    /// through the event system as a TestListRetrieved event.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `test_mode` - The test mode ("EditMode" or "PlayMode")
+    /// 
+    /// # Returns
+    /// 
+    /// Returns `Ok(())` if the request was sent successfully
+    pub async fn retrieve_test_list(&self, test_mode: &str) -> Result<(), UnityMessagingError> {
+        let test_list_message = Message::new(MessageType::RetrieveTestList, test_mode.to_string());
+        self.send_message(&test_list_message, None).await
+    }
+
+    /// Executes tests based on the specified filter
+    /// 
+    /// This method sends a test execution request to Unity. Test events will be available
+    /// through the event system (TestRunStarted, TestStarted, TestFinished, TestRunFinished).
+    /// 
+    /// # Arguments
+    /// 
+    /// * `filter` - The test filter (e.g., "EditMode", "PlayMode:MyTests.dll", "EditMode:MyNamespace.MyTestClass")
+    /// 
+    /// # Returns
+    /// 
+    /// Returns `Ok(())` if the request was sent successfully
+    pub async fn execute_tests(&self, filter: &str) -> Result<(), UnityMessagingError> {
+        let execute_tests_message = Message::new(MessageType::ExecuteTests, filter.to_string());
+        self.send_message(&execute_tests_message, None).await
     }
 
     /// Gets the Unity address this client is connected to
