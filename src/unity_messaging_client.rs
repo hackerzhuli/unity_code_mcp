@@ -187,7 +187,7 @@ pub enum UnityEvent {
 }
 
 /// Log levels for Unity log messages
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LogLevel {
     Info,
     Warning,

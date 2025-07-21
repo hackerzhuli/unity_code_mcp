@@ -4,13 +4,13 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::{mpsc, broadcast};
 use tokio::time::timeout;
 
-use crate::unity_messaging_client::{UnityMessagingClient, UnityEvent, UnityMessagingError};
+use crate::unity_messaging_client::{UnityMessagingClient, UnityEvent, UnityMessagingError, LogLevel};
 use crate::unity_project_manager::UnityProjectManager;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnityLogEntry {
     pub timestamp: SystemTime,
-    pub level: String,
+    pub level: LogLevel,
     pub message: String,
 }
 
@@ -92,12 +92,12 @@ impl UnityManager {
                                 
                                 if !is_duplicate {
                                     let log_entry = UnityLogEntry {
-                                        timestamp: SystemTime::now(),
-                                        level: format!("{:?}", level), // Convert LogLevel enum to string
-                                        message: message.clone(),
-                                    };
+                                    timestamp: SystemTime::now(),
+                                    level: level.clone(),
+                                    message: message.clone(),
+                                };
                                     
-                                    println!("[DEBUG] Adding log entry: [{}] {}", log_entry.level, log_entry.message);
+                                    println!("[DEBUG] Adding log entry: [{:?}] {}", log_entry.level, log_entry.message);
                                     
                                     if let Ok(mut logs_guard) = logs.lock() {
                                         logs_guard.push_back(log_entry);
@@ -110,7 +110,7 @@ impl UnityManager {
                                         println!("[DEBUG] Total logs now: {}", logs_guard.len());
                                     }
                                 } else {
-                                    println!("[DEBUG] Skipping duplicate log: [{}] {}", format!("{:?}", level), message);
+                                    println!("[DEBUG] Skipping duplicate log: [{:?}] {}", level, message);
                                 }
                             },
                             _ => {
