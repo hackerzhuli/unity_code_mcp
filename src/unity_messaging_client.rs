@@ -214,6 +214,7 @@ pub struct UnityMessagingClient {
     event_sender: broadcast::Sender<UnityEvent>,
     listener_task: Option<JoinHandle<()>>,
     last_response_time: std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>,
+    is_online: std::sync::Arc<std::sync::Mutex<bool>>,
 }
 
 impl UnityMessagingClient {
@@ -244,6 +245,7 @@ impl UnityMessagingClient {
             event_sender,
             listener_task: None,
             last_response_time: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            is_online: std::sync::Arc::new(std::sync::Mutex::new(false)),
         })
     }
 
@@ -266,10 +268,11 @@ impl UnityMessagingClient {
         let unity_address = self.unity_address;
         let event_sender = self.event_sender.clone();
         let last_response_time = self.last_response_time.clone();
+        let is_online = self.is_online.clone();
 
         // Spawn background task for message listening
         let task = tokio::spawn(async move {
-            Self::message_listener_task(socket, unity_address, event_sender, last_response_time).await;
+            Self::message_listener_task(socket, unity_address, event_sender, last_response_time, is_online).await;
         });
 
         self.listener_task = Some(task);
@@ -298,6 +301,7 @@ impl UnityMessagingClient {
         unity_address: SocketAddr,
         event_sender: broadcast::Sender<UnityEvent>,
         last_response_time: std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>,
+        is_online: std::sync::Arc<std::sync::Mutex<bool>>,
     ) {
         let mut buffer = [0u8; 8192];
         let mut ping_interval = tokio::time::interval(Duration::from_secs(1));
@@ -320,6 +324,26 @@ impl UnityMessagingClient {
                                 // Update last response time for any valid message
                                 if let Ok(mut time) = last_response_time.lock() {
                                     *time = Some(std::time::Instant::now());
+                                }
+                                
+                                // Update online state based on message type
+                                match message.message_type {
+                                    MessageType::Online => {
+                                        if let Ok(mut online) = is_online.lock() {
+                                            *online = true;
+                                        }
+                                    }
+                                    MessageType::Offline => {
+                                        if let Ok(mut online) = is_online.lock() {
+                                            *online = false;
+                                        }
+                                    }
+                                    _ => {
+                                        // Any other message from Unity means it's online
+                                        if let Ok(mut online) = is_online.lock() {
+                                            *online = true;
+                                        }
+                                    }
                                 }
                                 
                                 // Handle the message and potentially broadcast an event
@@ -491,6 +515,23 @@ impl UnityMessagingClient {
     /// Gets the Unity address this client is connected to
     pub fn unity_address(&self) -> SocketAddr {
         self.unity_address
+    }
+
+    /// Checks if Unity is currently online
+    /// 
+    /// Unity is considered online if:
+    /// - We have received at least one message from Unity, AND
+    /// - We haven't received an explicit Offline message
+    /// 
+    /// # Returns
+    /// 
+    /// Returns `true` if Unity is online, `false` otherwise
+    pub fn is_online(&self) -> bool {
+        if let Ok(online) = self.is_online.lock() {
+            *online
+        } else {
+            false
+        }
     }
 }
 

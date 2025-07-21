@@ -38,3 +38,49 @@ pub fn cleanup_test_uss_file(uss_path: &std::path::Path) {
         std::fs::remove_file(meta_path).expect("Failed to delete test USS meta file");
     }
 }
+
+/// Creates a C# script to trigger Unity compilation
+pub fn create_test_cs_script(project_path: &std::path::Path) -> std::path::PathBuf {
+    let cs_path = project_path.join("Assets").join("Scripts").join("TestCompilation.cs");
+    let cs_content = r#"using UnityEngine;
+
+namespace UnityProject
+{
+    /// <summary>
+    /// A test script to trigger Unity compilation and offline state.
+    /// </summary>
+    public class TestCompilation : MonoBehaviour
+    {
+        /// <summary>
+        /// A simple test method.
+        /// </summary>
+        public void TestMethod()
+        {
+            Debug.Log("Test compilation script loaded");
+        }
+    }
+}
+"#;
+    
+    // Ensure the Scripts directory exists
+    let scripts_dir = cs_path.parent().unwrap();
+    if !scripts_dir.exists() {
+        std::fs::create_dir_all(scripts_dir).expect("Failed to create Scripts directory");
+    }
+    
+    std::fs::write(&cs_path, cs_content).expect("Failed to create test C# script");
+    cs_path
+}
+
+/// Deletes the test C# script
+pub fn cleanup_test_cs_script(cs_path: &std::path::Path) {
+    if cs_path.exists() {
+        std::fs::remove_file(cs_path).expect("Failed to delete test C# script");
+    }
+
+    // Also remove the .meta file if it exists
+    let meta_path = cs_path.with_extension("cs.meta");
+    if meta_path.exists() {
+        std::fs::remove_file(meta_path).expect("Failed to delete test C# script meta file");
+    }
+}

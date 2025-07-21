@@ -51,6 +51,9 @@ async fn main() {
                                 if client.is_connected(Some(5)) {
                                     println!("✓ Unity connection test successful!");
                                     
+                                    // Check Unity online status
+                                    println!("Unity online status: {}", client.is_online());
+                                    
                                     // Try to get version and project path
                                     if let Ok(version) = client.get_version().await {
                                         println!("Unity package version: {}", version);
@@ -61,6 +64,7 @@ async fn main() {
                                     }
                                 } else {
                                     println!("✗ Unity connection test failed: No recent responses from Unity");
+                                    println!("Unity online status: {}", client.is_online());
                                 }
                                 
                                 client.stop_listening();
