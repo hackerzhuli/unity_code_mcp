@@ -141,7 +141,7 @@ async fn test_unity_log_generation_and_listening() {
 
     // Test basic connectivity first with a ping
     println!("Testing Unity connectivity with ping...");
-    match client.send_message(&Message::ping(), false).await {
+    match client.send_message(&Message::ping(), false, None).await {
         Ok(_) => println!("✓ Ping sent successfully"),
         Err(e) => {
             println!("⚠ Failed to send ping to Unity: {}", e);
@@ -312,7 +312,7 @@ async fn test_unity_online_offline_state() {
         println!("Warning: Failed to send second refresh message after cleanup: {}", e);
     } else {
         // Wait for Unity to complete the second compilation cycle
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        tokio::time::sleep(Duration::from_secs(6)).await;
     }
 
     // Stop listening

@@ -446,7 +446,7 @@ impl UnityMessagingClient {
         }
     }
 
-    /// Sends a message to Unity and optionally waits for a response
+    /// Sends a message to Unity and optionally waits for a response (internal use)
     /// 
     /// # Arguments
     /// 
@@ -456,7 +456,7 @@ impl UnityMessagingClient {
     /// # Returns
     /// 
     /// Returns the response message if `expect_response` is true, otherwise None
-    pub async fn send_message(&self, message: &Message, expect_response: bool) -> Result<Option<Message>, UnityMessagingError> {
+    async fn send_message_internal(&self, message: &Message, expect_response: bool) -> Result<Option<Message>, UnityMessagingError> {
         // Serialize and send the message
         let data = message.serialize();
         match self.socket.send_to(&data, self.unity_address).await {
@@ -501,6 +501,39 @@ impl UnityMessagingClient {
         }
     }
 
+    /// Sends a message to Unity with automatic waiting for Unity to be online
+    /// 
+    /// This method will wait for Unity to be online before sending the message.
+    /// If Unity is not online, it will poll the online status until Unity comes online
+    /// or the timeout is reached.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `message` - The message to send
+    /// * `expect_response` - Whether to wait for a response
+    /// * `timeout_seconds` - Maximum time to wait for Unity to be online (default: 30 seconds)
+    /// 
+    /// # Returns
+    /// 
+    /// Returns the response message if `expect_response` is true, otherwise None
+    pub async fn send_message(&self, message: &Message, expect_response: bool, timeout_seconds: Option<u64>) -> Result<Option<Message>, UnityMessagingError> {
+        let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30));
+        let start_time = std::time::Instant::now();
+        
+        // Wait for Unity to be online
+        while !self.is_online() {
+            if start_time.elapsed() >= timeout {
+                return Err(UnityMessagingError::Timeout);
+            }
+            
+            // Sleep for a short time before checking again
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        
+        // Unity is online, send the message
+        self.send_message_internal(message, expect_response).await
+    }
+
     /// Checks if Unity is currently connected and responsive
     /// 
     /// # Arguments
@@ -529,7 +562,7 @@ impl UnityMessagingClient {
     pub async fn get_version(&self) -> Result<String, UnityMessagingError> {
         let version_message = Message::new(MessageType::Version, String::new());
         
-        match self.send_message(&version_message, true).await? {
+        match self.send_message(&version_message, true, None).await? {
             Some(response) if response.message_type == MessageType::Version => Ok(response.value),
             Some(response) => Err(UnityMessagingError::InvalidMessage(
                 format!("Expected Version response, got {:?}", response.message_type)
@@ -546,7 +579,7 @@ impl UnityMessagingClient {
     pub async fn get_project_path(&self) -> Result<String, UnityMessagingError> {
         let project_path_message = Message::new(MessageType::ProjectPath, String::new());
         
-        match self.send_message(&project_path_message, true).await? {
+        match self.send_message(&project_path_message, true, None).await? {
             Some(response) if response.message_type == MessageType::ProjectPath => Ok(response.value),
             Some(response) => Err(UnityMessagingError::InvalidMessage(
                 format!("Expected ProjectPath response, got {:?}", response.message_type)
