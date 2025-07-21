@@ -1,7 +1,9 @@
-use std::net::{UdpSocket, SocketAddr};
+use std::net::SocketAddr;
 use std::time::Duration;
-use tokio::time::timeout;
-use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
+use tokio::net::UdpSocket;
+use serde::Deserialize;
 
 /// Message types as defined in the Unity Package Messaging Protocol
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,6 +152,46 @@ impl Message {
     }
 }
 
+/// Events that can be broadcast from Unity messaging
+#[derive(Debug, Clone)]
+pub enum UnityEvent {
+    /// Log message received from Unity
+    LogMessage {
+        level: LogLevel,
+        message: String,
+    },
+    /// Unity version information
+    Version(String),
+    /// Unity project path
+    ProjectPath(String),
+    /// Test run started
+    TestRunStarted,
+    /// Test run finished
+    TestRunFinished,
+    /// Test started
+    TestStarted(String),
+    /// Test finished
+    TestFinished(String),
+    /// Test list retrieved
+    TestListRetrieved(String),
+    /// Compilation finished
+    CompilationFinished,
+    /// Unity went online
+    Online,
+    /// Unity went offline
+    Offline,
+    /// Unity play mode changed
+    IsPlaying(bool),
+}
+
+/// Log levels for Unity log messages
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LogLevel {
+    Info,
+    Warning,
+    Error,
+}
+
 /// Errors that can occur during Unity messaging
 #[derive(Debug, thiserror::Error)]
 pub enum UnityMessagingError {
@@ -161,17 +203,21 @@ pub enum UnityMessagingError {
     Timeout,
     #[error("Unity process not found")]
     ProcessNotFound,
+    #[error("Event listener task failed")]
+    TaskFailed,
 }
 
-/// Unity messaging client that communicates via UDP
+/// Unity messaging client that communicates via UDP with event broadcasting
 pub struct UnityMessagingClient {
-    socket: UdpSocket,
+    socket: std::net::UdpSocket,
     unity_address: SocketAddr,
-    timeout_duration: Duration,
+    _timeout_duration: Duration,
+    event_sender: broadcast::Sender<UnityEvent>,
+    listener_task: Option<JoinHandle<()>>,
 }
 
 impl UnityMessagingClient {
-    /// Creates a new Unity messaging client
+    /// Creates a new Unity messaging client with event broadcasting
     /// 
     /// # Arguments
     /// 
@@ -186,15 +232,152 @@ impl UnityMessagingClient {
         let unity_address = SocketAddr::from(([127, 0, 0, 1], unity_port as u16));
 
         // Create UDP socket
-        let socket = UdpSocket::bind("0.0.0.0:0")?; // Bind to any available port
+        let socket = std::net::UdpSocket::bind("0.0.0.0:0")?; // Bind to any available port
         socket.set_read_timeout(Some(Duration::from_secs(5)))?;
         socket.set_write_timeout(Some(Duration::from_secs(5)))?;
+
+        // Create broadcast channel for events
+        let (event_sender, event_receiver) = broadcast::channel(1000);
 
         Ok(Self {
             socket,
             unity_address,
-            timeout_duration: Duration::from_secs(5),
+            _timeout_duration: Duration::from_secs(5),
+            event_sender,
+            listener_task: None,
         })
+    }
+
+    /// Starts automatic message listening and event broadcasting
+    /// 
+    /// This method spawns a background task that continuously listens for Unity messages
+    /// and broadcasts events to subscribers. Internal messages like ping/pong are handled
+    /// automatically without broadcasting events.
+    /// 
+    /// # Returns
+    /// 
+    /// Returns `Ok(())` if the listener was started successfully
+    pub fn start_listening(&mut self) -> Result<(), UnityMessagingError> {
+        if self.listener_task.is_some() {
+            return Ok(()); // Already listening
+        }
+
+        // Clone necessary data for the background task
+        let socket = self.socket.try_clone()?;
+        let unity_address = self.unity_address;
+        let event_sender = self.event_sender.clone();
+
+        // Spawn background task for message listening
+        let task = tokio::spawn(async move {
+            // Convert std::net::UdpSocket to tokio::net::UdpSocket
+            let tokio_socket = UdpSocket::from_std(socket).expect("Failed to convert socket");
+            Self::message_listener_task(tokio_socket, unity_address, event_sender).await;
+        });
+
+        self.listener_task = Some(task);
+        Ok(())
+    }
+
+    /// Stops the automatic message listening
+    pub fn stop_listening(&mut self) {
+        if let Some(task) = self.listener_task.take() {
+            task.abort();
+        }
+    }
+
+    /// Gets a receiver for Unity events
+    /// 
+    /// # Returns
+    /// 
+    /// Returns a new broadcast receiver that can be used to listen for Unity events
+    pub fn subscribe_to_events(&self) -> broadcast::Receiver<UnityEvent> {
+        self.event_sender.subscribe()
+    }
+
+    /// Background task that listens for Unity messages and broadcasts events
+    async fn message_listener_task(
+        socket: UdpSocket,
+        unity_address: SocketAddr,
+        event_sender: broadcast::Sender<UnityEvent>,
+    ) {
+        let mut buffer = [0u8; 8192];
+        
+        loop {
+            // Use tokio's timeout for async operations
+            match tokio::time::timeout(Duration::from_millis(100), socket.recv_from(&mut buffer)).await {
+                Ok(Ok((bytes_received, _))) => {
+                    if let Ok(message) = Message::deserialize(&buffer[..bytes_received]) {
+                        // Handle the message and potentially broadcast an event
+                        if let Some(event) = Self::message_to_event(&message) {
+                            if let Err(_) = event_sender.send(event) {
+                                // No receivers, continue listening
+                            }
+                        }
+                        
+                        // Handle internal messages (ping/pong)
+                        if message.message_type == MessageType::Ping {
+                            let pong = Message::pong();
+                            if let Err(e) = socket.send_to(&pong.serialize(), unity_address).await {
+                                eprintln!("Failed to send pong response: {}", e);
+                            }
+                        }
+                    }
+                }
+                Ok(Err(e)) => {
+                    eprintln!("Socket error in message listener: {}", e);
+                    break;
+                }
+                Err(_) => {
+                    // Timeout occurred, continue listening
+                    continue;
+                }
+            }
+        }
+    }
+
+    /// Converts a Unity message to an event (if it should be broadcast)
+    fn message_to_event(message: &Message) -> Option<UnityEvent> {
+        match message.message_type {
+            // Log messages
+            MessageType::Info => Some(UnityEvent::LogMessage {
+                level: LogLevel::Info,
+                message: message.value.clone(),
+            }),
+            MessageType::Warning => Some(UnityEvent::LogMessage {
+                level: LogLevel::Warning,
+                message: message.value.clone(),
+            }),
+            MessageType::Error => Some(UnityEvent::LogMessage {
+                level: LogLevel::Error,
+                message: message.value.clone(),
+            }),
+            
+            // Unity state messages
+            MessageType::Version => Some(UnityEvent::Version(message.value.clone())),
+            MessageType::ProjectPath => Some(UnityEvent::ProjectPath(message.value.clone())),
+            MessageType::Online => Some(UnityEvent::Online),
+            MessageType::Offline => Some(UnityEvent::Offline),
+            MessageType::IsPlaying => {
+                let is_playing = message.value.to_lowercase() == "true";
+                Some(UnityEvent::IsPlaying(is_playing))
+            },
+            
+            // Test messages
+            MessageType::TestRunStarted => Some(UnityEvent::TestRunStarted),
+            MessageType::TestRunFinished => Some(UnityEvent::TestRunFinished),
+            MessageType::TestStarted => Some(UnityEvent::TestStarted(message.value.clone())),
+            MessageType::TestFinished => Some(UnityEvent::TestFinished(message.value.clone())),
+            MessageType::TestListRetrieved => Some(UnityEvent::TestListRetrieved(message.value.clone())),
+            
+            // Compilation messages
+            MessageType::CompilationFinished => Some(UnityEvent::CompilationFinished),
+            
+            // Internal messages (don't broadcast)
+            MessageType::Ping | MessageType::Pong => None,
+            
+            // Other messages (don't broadcast for now)
+            _ => None,
+        }
     }
 
     /// Sends a message to Unity and optionally waits for a response
@@ -369,6 +552,13 @@ impl UnityMessagingClient {
     }
 }
 
+/// Cleanup when the client is dropped
+impl Drop for UnityMessagingClient {
+    fn drop(&mut self) {
+        self.stop_listening();
+    }
+}
+
 /// Test utilities for Unity project management
 #[cfg(test)]
 mod test_utils {
@@ -497,6 +687,107 @@ mod tests {
             Ok(path) => println!("✓ Unity project path: {}", path),
             Err(e) => println!("Failed to get Unity project path: {}", e),
         }
+    }
+
+    #[tokio::test]
+    async fn test_unity_event_broadcasting() {
+        let project_path = get_unity_project_path();
+        let mut manager = match UnityProjectManager::new(project_path.to_string_lossy().to_string()).await {
+            Ok(manager) => manager,
+            Err(_) => {
+                println!("Skipping event test: Unity project not found");
+                return;
+            }
+        };
+
+        // Update process info to check if Unity is running
+        if manager.update_process_info().await.is_err() {
+            println!("Skipping event test: Unity Editor not running");
+            return;
+        }
+
+        let unity_process_id = manager.unity_process_id().expect("Unity process ID should be available");
+        let mut client = match UnityMessagingClient::new(unity_process_id) {
+            Ok(client) => client,
+            Err(e) => {
+                println!("Skipping event test: Failed to create messaging client: {}", e);
+                return;
+            }
+        };
+
+        // Subscribe to events before starting the listener
+        let mut event_receiver = client.subscribe_to_events();
+
+        // Start automatic message listening
+        if let Err(e) = client.start_listening() {
+            println!("Failed to start listening: {}", e);
+            return;
+        }
+        println!("✓ Started automatic message listening");
+
+        // Create a USS file with errors to trigger Unity warnings
+        let uss_path = create_test_uss_file(&project_path);
+        println!("Created test USS file: {}", uss_path.display());
+
+        // Send refresh message to Unity
+        if let Err(e) = client.send_refresh_message() {
+            println!("Failed to send refresh message: {}", e);
+            cleanup_test_uss_file(&uss_path);
+            return;
+        }
+        println!("✓ Sent refresh message to Unity");
+
+        // Listen for events for a short time
+        println!("Listening for Unity events for 3 seconds...");
+        let start_time = std::time::Instant::now();
+        let timeout_duration = Duration::from_secs(3);
+        let mut event_count = 0;
+
+        while start_time.elapsed() < timeout_duration {
+            match tokio::time::timeout(Duration::from_millis(100), event_receiver.recv()).await {
+                Ok(Ok(event)) => {
+                    event_count += 1;
+                    match event {
+                        UnityEvent::LogMessage { level, message } => {
+                            println!("[{:?}] {}", level, message);
+                        }
+                        UnityEvent::Version(version) => {
+                            println!("[VERSION] {}", version);
+                        }
+                        UnityEvent::ProjectPath(path) => {
+                            println!("[PROJECT_PATH] {}", path);
+                        }
+                        UnityEvent::IsPlaying(playing) => {
+                            println!("[IS_PLAYING] {}", playing);
+                        }
+                        _ => {
+                            println!("[EVENT] {:?}", event);
+                        }
+                    }
+                }
+                Ok(Err(broadcast::error::RecvError::Lagged(skipped))) => {
+                    println!("Warning: Skipped {} events due to lag", skipped);
+                }
+                Ok(Err(broadcast::error::RecvError::Closed)) => {
+                    println!("Event channel closed");
+                    break;
+                }
+                Err(_) => {
+                    // Timeout, continue
+                }
+            }
+        }
+
+        println!("✓ Event listening completed. Received {} events in {} seconds", 
+                event_count, start_time.elapsed().as_secs_f32());
+
+        // Stop listening
+        client.stop_listening();
+        println!("✓ Stopped automatic message listening");
+
+        // Clean up the test file
+        cleanup_test_uss_file(&uss_path);
+        println!("✓ Cleaned up test USS file");
     }
 
     #[tokio::test]

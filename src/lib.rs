@@ -8,4 +8,4 @@ pub mod unity_project_manager;
 pub mod unity_messaging_client;
 
 pub use unity_project_manager::UnityProjectManager;
-pub use unity_messaging_client::{UnityMessagingClient, Message, MessageType, UnityMessagingError};
+pub use unity_messaging_client::{UnityMessagingClient, Message, MessageType, UnityMessagingError, UnityEvent, LogLevel};
