@@ -34,7 +34,8 @@ pub fn cleanup_test_uss_file(uss_path: &std::path::Path) {
         }
     }
     
-    // Also delete the .meta file to ensure Unity recognizes the change
+    // Also delete the .meta file to ensure if we create the uss file again
+    // unity will treat it as a new file
     let meta_path = uss_path.with_extension("uss.meta");
     if meta_path.exists() {
         if let Err(e) = std::fs::remove_file(&meta_path) {
