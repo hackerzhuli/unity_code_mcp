@@ -169,8 +169,7 @@ async fn execute_unity_tests_with_validation(
         .map_err(|e| format!("Failed to execute tests: {}", e))?;
 
     println!("✓ Test execution completed: {}", test_result.execution_completed);
-     println!("Tests started: {}", test_result.started_tests.len());
-     println!("Tests finished: {}", test_result.finished_tests.len());
+     println!("Individual test results: {}", test_result.individual_test_results.len());
 
      // Verify execution completed
      assert!(test_result.execution_completed, "Test execution should complete");

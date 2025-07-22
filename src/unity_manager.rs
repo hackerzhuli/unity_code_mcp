@@ -31,40 +31,40 @@ struct TestResultAdaptorContainer {
     test_result_adaptors: Vec<TestResultAdaptor>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct TestResultAdaptor {
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TestResultAdaptor {
     #[serde(rename = "TestId")]
-    test_id: String,
+    pub test_id: String,
     #[serde(rename = "PassCount")]
-    pass_count: u32,
+    pub pass_count: u32,
     #[serde(rename = "FailCount")]
-    fail_count: u32,
+    pub fail_count: u32,
     #[serde(rename = "InconclusiveCount")]
-    inconclusive_count: u32,
+    pub inconclusive_count: u32,
     #[serde(rename = "SkipCount")]
-    skip_count: u32,
+    pub skip_count: u32,
     #[serde(rename = "ResultState")]
-    result_state: String,
+    pub result_state: String,
     #[serde(rename = "StackTrace")]
-    stack_trace: String,
+    pub stack_trace: String,
     #[serde(rename = "TestStatus")]
-    test_status: u32,
+    pub test_status: u32,
     #[serde(rename = "AssertCount")]
-    assert_count: u32,
+    pub assert_count: u32,
     #[serde(rename = "Duration")]
-    duration: f64,
+    pub duration: f64,
     #[serde(rename = "StartTime")]
-    start_time: i64,
+    pub start_time: i64,
     #[serde(rename = "EndTime")]
-    end_time: i64,
+    pub end_time: i64,
     #[serde(rename = "Message")]
-    message: String,
+    pub message: String,
     #[serde(rename = "Output")]
-    output: String,
+    pub output: String,
     #[serde(rename = "HasChildren")]
-    has_children: bool,
+    pub has_children: bool,
     #[serde(rename = "Parent")]
-    parent: i32,
+    pub parent: i32,
 }
 
 /// Test mode for Unity tests
@@ -129,9 +129,7 @@ impl TestFilter {
 /// Test execution result
 #[derive(Debug, Clone)]
 pub struct TestExecutionResult {
-    pub started_tests: Vec<String>,
-    pub finished_tests: Vec<String>,
-    pub test_list: Option<String>,
+    pub individual_test_results: Vec<TestResultAdaptor>,
     pub execution_completed: bool,
     pub pass_count: u32,
     pub fail_count: u32,
@@ -203,11 +201,11 @@ impl UnityManager {
         let max_logs = self.max_logs;
         
         tokio::spawn(async move {
-            println!("[DEBUG] Log collection task started");
+            //println!("[DEBUG] Log collection task started");
             loop {
                 match event_receiver.recv().await {
                     Ok(event) => {
-                        println!("[DEBUG] Log collection received event: {:?}", event);
+                        //println!("[DEBUG] Log collection received event: {:?}", event);
                         match event {
                             UnityEvent::LogMessage { level, message } => {
                                 // Create a unique key for deduplication (message only)
@@ -237,17 +235,13 @@ impl UnityManager {
                                             logs_guard.pop_front();
                                         }
                                         
-                                        println!("[DEBUG] Total logs now: {}", logs_guard.len());
+                                        //println!("[DEBUG] Total logs now: {}", logs_guard.len());
                                     }
                                 } else {
-                                    println!("[DEBUG] Skipping duplicate log: [{:?}] {}", level, message);
+                                    //println!("[DEBUG] Skipping duplicate log: [{:?}] {}", level, message);
                                 }
                             },
                             _ => {
-                                // Log other events for debugging but don't spam
-                                if !matches!(event, UnityEvent::IsPlaying(_)) {
-                                    println!("[DEBUG] Non-log event received: {:?}", event);
-                                }
                             }
                         }
                     },
@@ -417,9 +411,7 @@ impl UnityManager {
             
             // Collect test execution events
             let mut result = TestExecutionResult {
-                started_tests: Vec::new(),
-                finished_tests: Vec::new(),
-                test_list: None,
+                individual_test_results: Vec::new(),
                 execution_completed: false,
                 pass_count: 0,
                 fail_count: 0,
@@ -438,11 +430,9 @@ impl UnityManager {
                             },
                             UnityEvent::TestStarted(test_info) => {
                                 println!("[DEBUG] Test started: {}", test_info);
-                                result.started_tests.push(test_info);
                             },
                             UnityEvent::TestFinished(test_result) => {
                                 println!("[DEBUG] Test finished: {}", test_result);
-                                result.finished_tests.push(test_result);
                             },
                             UnityEvent::TestRunFinished(data) => {
                                 println!("[DEBUG] Test run finished");
@@ -460,11 +450,17 @@ impl UnityManager {
                                             for adaptor in &container.test_result_adaptors {
                                                 pass_count += adaptor.pass_count;
                                                 fail_count += adaptor.fail_count;
+                                                
+                                                // Only include tests that don't have children
+                                                if !adaptor.has_children {
+                                                    result.individual_test_results.push(adaptor.clone());
+                                                }
                                             }
                                             
                                             result.pass_count = pass_count;
                                             result.fail_count = fail_count;
                                             println!("[DEBUG] Extracted counts: {} passed, {} failed", pass_count, fail_count);
+                                            println!("[DEBUG] Individual test results: {}", result.individual_test_results.len());
                                         },
                                         Err(e) => {
                                             println!("[DEBUG] Failed to deserialize TestResultAdaptorContainer: {}", e);
@@ -474,9 +470,8 @@ impl UnityManager {
                                 }
                                 break;
                             },
-                            UnityEvent::TestListRetrieved(test_list) => {
-                                // Sometimes Unity sends the test list during execution
-                                result.test_list = Some(test_list);
+                            UnityEvent::TestListRetrieved(_test_list) => {
+                                // Test list is no longer stored in TestExecutionResult
                             },
                             _ => {
                                 // Ignore other events during test execution
