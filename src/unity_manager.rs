@@ -151,15 +151,34 @@ impl TestFilter {
     }
 }
 
+/// Simplified test result containing only essential information
+#[derive(Debug, Clone)]
+pub struct SimpleTestResult {
+    /// The full name of the test including namespace and class
+    pub full_name: String,
+    /// Stack trace information if the test failed, empty if passed
+    pub stack_trace: String,
+    /// Whether the test passed (true) or failed (false)
+    pub passed: bool,
+    /// Duration of the test execution in seconds
+    pub duration: f64,
+    /// Error or failure message, empty if the test passed
+    pub message: String,
+    /// Test output logs captured during execution
+    pub output: String,
+}
+
 /// Test execution result
 #[derive(Debug, Clone)]
 pub struct TestExecutionResult {
-    pub individual_test_results: Vec<TestResultAdaptor>,
+    /// Simplified test results containing only essential information
+    pub test_results: Vec<SimpleTestResult>,
+    /// Whether the test execution completed successfully
     pub execution_completed: bool,
+    /// Total number of tests that passed
     pub pass_count: u32,
+    /// Total number of tests that failed
     pub fail_count: u32,
-    /// Mapping from TestId to test full name for validation
-    pub test_id_to_name: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -438,12 +457,14 @@ impl UnityManager {
             
             // Collect test execution events
             let mut result = TestExecutionResult {
-                individual_test_results: Vec::new(),
+                test_results: Vec::new(),
                 execution_completed: false,
                 pass_count: 0,
                 fail_count: 0,
-                test_id_to_name: HashMap::new(),
             };
+            
+            // Temporary mapping from TestId to test full name for building SimpleTestResult
+            let mut test_id_to_name: HashMap<String, String> = HashMap::new();
             
             let timeout_duration = Duration::from_secs(300); // 5 minutes for test execution
             let start_time = std::time::Instant::now();
@@ -467,9 +488,9 @@ impl UnityManager {
                                         for adaptor in &container.test_adaptors {
                                             println!("[DEBUG] TestStarted adaptor - Id: '{}', Name: '{}', FullName: '{}', Type: {:?}", 
                                                 adaptor.id, adaptor.name, adaptor.full_name, adaptor.test_type);
-                                            result.test_id_to_name.insert(adaptor.id.clone(), adaptor.full_name.clone());
+                                            test_id_to_name.insert(adaptor.id.clone(), adaptor.full_name.clone());
                                         }
-                                        println!("[DEBUG] Total mappings in test_id_to_name: {}", result.test_id_to_name.len());
+                                        println!("[DEBUG] Total mappings in test_id_to_name: {}", test_id_to_name.len());
                                     },
                                     Err(e) => {
                                         println!("[DEBUG] Failed to deserialize TestAdaptorContainer: {}", e);
@@ -486,7 +507,22 @@ impl UnityManager {
                                         for adaptor in &container.test_result_adaptors {
                                             println!("[DEBUG] TestFinished adaptor - TestId: '{}', PassCount: {}, FailCount: {}, ResultState: '{}'", 
                                                 adaptor.test_id, adaptor.pass_count, adaptor.fail_count, adaptor.result_state);
-                                            result.individual_test_results.push(adaptor.clone());
+                                            
+                                            // Create SimpleTestResult from TestResultAdaptor
+                                            let full_name = test_id_to_name.get(&adaptor.test_id)
+                                                .cloned()
+                                                .unwrap_or_else(|| format!("Unknown test (ID: {})", adaptor.test_id));
+                                            
+                                            let simple_result = SimpleTestResult {
+                                                full_name,
+                                                stack_trace: adaptor.stack_trace.clone(),
+                                                passed: adaptor.result_state == "Passed",
+                                                duration: adaptor.duration,
+                                                message: adaptor.message.clone(),
+                                                output: adaptor.output.clone(),
+                                            };
+                                            
+                                            result.test_results.push(simple_result);
                                         }
                                     },
                                     Err(e) => {

@@ -169,7 +169,7 @@ async fn execute_unity_tests_with_validation(
         .map_err(|e| format!("Failed to execute tests: {}", e))?;
 
     println!("✓ Test execution completed: {}", test_result.execution_completed);
-     println!("Individual test results: {}", test_result.individual_test_results.len());
+     println!("Individual test results: {}", test_result.test_results.len());
 
      // Verify execution completed
      assert!(test_result.execution_completed, "Test execution should complete");
@@ -186,27 +186,20 @@ async fn execute_unity_tests_with_validation(
     // Validate individual test results
     println!("\n=== Validating individual test results ===");
     for expected in &expected_individual_results {
-        // Find the test by looking up the TestId that maps to the expected full name
-        let actual_result = test_result.individual_test_results.iter()
-            .find(|result| {
-                if let Some(full_name) = test_result.test_id_to_name.get(&result.test_id) {
-                    full_name == &expected.full_name
-                } else {
-                    false
-                }
-            })
+        // Find the test by its full name in the simplified test results
+        let actual_result = test_result.test_results.iter()
+            .find(|result| result.full_name == expected.full_name)
             .ok_or_else(|| format!("Expected test '{}' not found in results", expected.full_name))?;
         
-        let test_passed = actual_result.result_state == "Passed";
-        assert_eq!(test_passed, expected.should_pass, 
-                   "Test '{}' expected to {}, but result state was '{}'", 
+        assert_eq!(actual_result.passed, expected.should_pass, 
+                   "Test '{}' expected to {}, but passed was {}", 
                    expected.full_name, 
                    if expected.should_pass { "pass" } else { "fail" }, 
-                   actual_result.result_state);
+                   actual_result.passed);
         
         println!("✓ Test '{}': {} (expected: {})", 
                  expected.full_name, 
-                 actual_result.result_state, 
+                 if actual_result.passed { "passed" } else { "failed" }, 
                  if expected.should_pass { "pass" } else { "fail" });
     }
     
