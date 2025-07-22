@@ -52,7 +52,8 @@ fn init_file_logging() {
     // Try to open the log file, but don't panic if it fails
     let target = match fs::OpenOptions::new()
         .create(true)
-        .append(false)
+        .write(true)
+        .truncate(true)
         .open(&log_file)
     {
         Ok(file) => Box::new(file),

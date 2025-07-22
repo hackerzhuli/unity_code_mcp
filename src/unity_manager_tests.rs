@@ -267,14 +267,14 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
     println!("✓ Created C# script with compilation errors");
     
     // Call the refresh method which should trigger compilation and collect error logs
-    let refresh_result = manager.refresh().await;
+    let refresh_result = manager.refresh_asset_database().await;
     
     // Clean up the test file immediately after refresh
     cleanup_test_cs_script_with_errors(&cs_path);
     println!("✓ Cleaned up test C# script");
 
     // trigger another round of compilation so unity reverts back to old state
-    let refresh_result_2 = manager.refresh().await;
+    let refresh_result_2 = manager.refresh_asset_database().await;
     
     // Verify the refresh method completed successfully
     match refresh_result {

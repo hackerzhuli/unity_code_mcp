@@ -694,7 +694,7 @@ impl UnityManager {
     /// # Returns
     ///
     /// Returns a RefreshResult containing comprehensive information about the refresh operation
-    pub async fn refresh(
+    pub async fn refresh_asset_database(
         &mut self,
     ) -> Result<RefreshResult, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &mut self.messaging_client {

@@ -92,7 +92,7 @@ impl UnityCodeMcpServer {
         let mut manager_guard = self.unity_manager.lock().await;
         let manager = manager_guard.as_mut().unwrap();
 
-        match manager.refresh().await {
+        match manager.refresh_asset_database().await {
             Ok(result) => {
                 let response = json!({
                     "refresh_completed": result.refresh_completed,
