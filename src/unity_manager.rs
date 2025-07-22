@@ -116,9 +116,12 @@ pub struct TestExecutionResult {
     pub pass_count: u32,
     /// Total number of tests that failed
     pub fail_count: u32,
-    duration_seconds: f64,
-    test_count: u32,
-    skip_count: u32,
+    /// Total duration of the test execution in seconds
+    pub duration_seconds: f64,
+    /// Total number of tests
+    pub test_count: u32,
+    /// Total number of tests that skipped
+    pub skip_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
