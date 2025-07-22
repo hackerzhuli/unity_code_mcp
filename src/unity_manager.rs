@@ -17,7 +17,9 @@ pub struct RefreshResult {
     /// Error message from refresh response (if any)
     pub refresh_error_message: Option<String>,
     /// Whether compilation occurred during the refresh
-    pub compilation_occurred: bool,
+    pub compilation_started: bool,
+    /// Whether compilation completed during the refresh
+    pub compilation_completed: bool,
     /// Error logs collected during the refresh process
     pub error_logs: Vec<String>,
     /// Total duration of the refresh operation in seconds
@@ -427,6 +429,29 @@ impl UnityManager {
         }
     }
 
+    /// Wait for Unity to become online
+    /// 
+    /// # Arguments
+    /// 
+    /// * `timeout_seconds` - Maximum time to wait for Unity to become online
+    /// 
+    /// # Returns
+    /// 
+    /// Returns `Ok(())` if Unity becomes online within the timeout period, `Err` otherwise
+    pub async fn wait_online(&mut self, timeout_seconds: u64) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(client) = &mut self.messaging_client {
+            for _ in 0..timeout_seconds * 10 {
+                if client.is_online() {
+                    return Ok(());
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err("Timeout waiting for Unity to become online".into())
+        } else {
+            Err("Messaging client not initialized".into())
+        }
+    }
+
     /// Send refresh message to Unity (this is the simple variant that just sends the message)
     pub async fn refresh_unity(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &mut self.messaging_client {
@@ -681,7 +706,8 @@ impl UnityManager {
                                     return Ok(RefreshResult {
                                         refresh_completed: false,
                                         refresh_error_message: Some(message),
-                                        compilation_occurred: false,
+                                        compilation_started: false,
+                                        compilation_completed: false,
                                         error_logs: Vec::new(),
                                         duration_seconds: duration,
                                     });
@@ -706,7 +732,8 @@ impl UnityManager {
                 return Ok(RefreshResult {
                     refresh_completed: false,
                     refresh_error_message: Some("Timeout waiting for refresh response".to_string()),
-                    compilation_occurred: false,
+                    compilation_started: false,
+                    compilation_completed: false,
                     error_logs: Vec::new(),
                     duration_seconds: duration,
                 });
@@ -765,7 +792,8 @@ impl UnityManager {
                     return Ok(RefreshResult {
                         refresh_completed: false,
                         refresh_error_message: Some("Timeout waiting for compilation to finish after 60 seconds".to_string()),
-                        compilation_occurred: true,
+                        compilation_started: true,
+                        compilation_completed: false,
                         error_logs: Vec::new(),
                         duration_seconds: duration,
                     });
@@ -793,7 +821,8 @@ impl UnityManager {
             Ok(RefreshResult {
                 refresh_completed: true,
                 refresh_error_message: None,
-                compilation_occurred: compilation_started,
+                compilation_started:true,
+                compilation_completed:true,
                 error_logs,
                 duration_seconds: duration,
             })

@@ -1,12 +1,13 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::net::{UdpSocket, TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::time::sleep;
 
 /// Message types as defined in the Unity Package Messaging Protocol
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -561,7 +562,7 @@ impl UnityMessagingClient {
     fn requires_stable_delivery(message_type: MessageType) -> bool {
         match message_type {
             // Messages that can be sent immediately (don't require stable delivery)
-            MessageType::Ping | MessageType::Pong | MessageType::Refresh => false,
+            MessageType::Ping | MessageType::Pong => false,
             
             // All other messages require stable delivery
             _ => true,
@@ -586,7 +587,7 @@ impl UnityMessagingClient {
         // Check if this message type requires stable delivery
         if Self::requires_stable_delivery(message.message_type) {
             let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30));
-            let start_time = std::time::Instant::now();
+            let start_time = Instant::now();
             
             // Wait for Unity to be online
             while !self.is_online() {
@@ -595,7 +596,7 @@ impl UnityMessagingClient {
                 }
                 
                 // Sleep for a short time before checking again
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                sleep(Duration::from_millis(100)).await;
             }
         }
         
@@ -656,7 +657,7 @@ impl UnityMessagingClient {
     /// Returns `Ok(())` if the ping was sent successfully
     pub async fn send_ping(&self) -> Result<(), UnityMessagingError> {
         let ping_message = Message::ping();
-        self.send_message_internal(&ping_message).await
+        self.send_message(&ping_message, None).await
     }
 
     /// Sends a refresh message to Unity to refresh the asset database

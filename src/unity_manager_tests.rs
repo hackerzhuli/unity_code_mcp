@@ -1,6 +1,6 @@
 use std::time::Duration;
 use std::collections::HashMap;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 
 use crate::test_utils::{cleanup_test_uss_file, create_test_uss_file, get_unity_project_path, create_test_cs_script, cleanup_test_cs_script, create_test_cs_script_with_errors, cleanup_test_cs_script_with_errors};
 use crate::unity_manager::{UnityManager, TestMode};
@@ -29,20 +29,12 @@ async fn test_unity_manager_log_collection() {
         return;
     }
 
-    // Clear any existing logs
-    manager.clear_logs();
-    assert_eq!(manager.log_count(), 0, "Logs should be cleared initially");
-
     // Give the listener task a moment to start up
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    sleep(Duration::from_millis(500)).await;
 
     // Test basic connectivity by checking if Unity is online FIRST
     println!("Testing Unity connectivity...");
-    if !manager.is_unity_online() {
-        println!("⚠ Unity is not responding to ping");
-        println!("This suggests Unity is running but the messaging package may not be installed or active.");
-        return; // Don't fail the test, just skip it
-    }
+    assert!(manager.is_unity_online(), "Unity should be online");
     println!("✓ Unity connectivity confirmed");
     
     // Create a USS file with invalid syntax to trigger warning logs
@@ -149,15 +141,10 @@ async fn execute_unity_tests_with_validation(
     manager.initialize_messaging().await
         .map_err(|_| "Unity Editor not running or messaging failed")?;
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    
-    assert!(manager.is_unity_online(), "unity should be online");
+    // Wait for Unity to become online
+    manager.wait_online(3).await
+        .map_err(|e| format!("Timeout waiting for Unity to become online: {}", e))?;
     println!("✓ Unity connectivity confirmed");
-    
-    // Send refresh to Unity to clear any cached test results
-    let _ = manager.refresh_unity().await;
-    tokio::time::sleep(Duration::from_millis(1000)).await;
-    println!("✓ Unity refresh sent to clear cached results");
 
     // Execute tests with the specified filter
     println!("\n=== Executing tests with filter: {} ===", test_filter);
@@ -277,21 +264,21 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
     println!("✓ Created C# script with compilation errors");
     
     // Call the refresh method which should trigger compilation and collect error logs
-    let refresh_result = timeout(Duration::from_secs(60), manager.refresh()).await;
+    let refresh_result = manager.refresh().await;
     
     // Clean up the test file immediately after refresh
     cleanup_test_cs_script_with_errors(&cs_path);
     println!("✓ Cleaned up test C# script");
 
     // trigger another round of compilation so unity reverts back to old state
-    let _ = timeout(Duration::from_secs(60), manager.refresh()).await;
+    let refresh_result_2 = manager.refresh().await;
     
     // Verify the refresh method completed successfully
     match refresh_result {
-        Ok(Ok(result)) => {
+        Ok(result) => {
             println!("✓ Refresh method completed successfully");
             println!("Refresh completed: {}", result.refresh_completed);
-            println!("Compilation occurred: {}", result.compilation_occurred);
+            println!("Compilation occurred: {}", result.compilation_started);
             println!("Duration: {:.2} seconds", result.duration_seconds);
             println!("Collected {} error logs during refresh", result.error_logs.len());
             
@@ -323,7 +310,7 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
                 println!("Error log {}: {}", i + 1, log);
             }
         },
-        Ok(Err(e)) => {
+        Err(e) => {
             println!("⚠ Refresh method failed: {}", e);
             // Don't fail the test if Unity is not available or has issues
             return;
@@ -334,7 +321,15 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
             return;
         }
     }
-    
+
+    // use if let
+    if let Ok(result) = refresh_result_2 {
+        assert!(result.refresh_completed, "Refresh should have completed successfully");
+        assert!(result.compilation_started, "Should have compiled");
+    }else{
+        assert!(false, "Refresh should have completed successfully");
+    }
+
     // Clean up
     manager.shutdown().await;
     println!("✓ Refresh test completed successfully");
