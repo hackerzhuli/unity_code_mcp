@@ -777,9 +777,9 @@ impl UnityManager {
                 });
             }
 
-            // Wait for compilation started event for 3 seconds
+            // Wait for compilation started event for 1 second
             let compilation_wait_start = std::time::Instant::now();
-            while compilation_wait_start.elapsed() < Duration::from_secs(3) && !compilation_started
+            while compilation_wait_start.elapsed() < Duration::from_millis(1000) && !compilation_started
             {
                 match timeout(Duration::from_millis(100), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
