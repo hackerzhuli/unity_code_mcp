@@ -75,7 +75,7 @@ namespace TestExecution.Editor
             sb.AppendLine("=== LARGE MESSAGE TEST FROM EDIT MODE TEST ===");
             
             // Add enough content to exceed 8KB
-            for (int i = 0; i < 200; i++)
+            for (int i = 0; i < 50; i++)
             {
                 sb.AppendLine($"Line {i:D3}: This is a test line with some content to make the message large. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.");
             }

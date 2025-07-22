@@ -155,7 +155,12 @@ async fn test_tcp_fallback_integration_with_unity() {
         loop {
             match event_receiver.recv().await {
                 Ok(UnityEvent::TestFinished(test_result)) => {
-                    println!("[TEST] Test finished: {}", test_result);
+                    if test_result.len() < 200 {
+                        println!("[TEST] Test finished: {}", test_result);
+                    }else{
+                        println!("[TEST] Test finished: (length is {}) (omitted)", test_result.len());
+                    }
+                    
                     test_completed = true;
                     break;
                 }

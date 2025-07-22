@@ -377,7 +377,11 @@ impl UnityMessagingClient {
                             if let Ok(message) = Message::deserialize(&buffer[..bytes_received]) {
                                 // Debug logging for all received messages except Ping and Pong
                                 if !matches!(message.message_type, MessageType::Ping | MessageType::Pong) {
-                                    println!("[DEBUG] Received Unity message: {:?} with value: '{}'", message.message_type, message.value);
+                                    if message.value.len() < 100 {
+                                        println!("[DEBUG] Received Unity message: {:?} with value: '{}'", message.message_type, message.value);
+                                    }else{
+                                        println!("[DEBUG] Received Unity message: {:?} with value length: '{}' (value omitted)", message.message_type, message.value.len());
+                                    }
                                 }
                                 
                                 // Special logging for log messages
