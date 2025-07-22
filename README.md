@@ -80,7 +80,7 @@ This seamless workflow allows AI assistants to develop Unity code autonomously, 
 Install the [Visual Studio Code Editor](https://github.com/hackerzhuli/com.hackerzhuli.code) package in your Unity project.
 
 ### Step 2: Get the Binary
-**Option A: Download Release** (Recommended)
+**Option A: Download Release** (Recommended) (Windows Only)
 - Download the latest binary from the [Releases](https://github.com/your-repo/unity-code-mcp/releases) page
 
 **Option B: Build from Source**
@@ -123,6 +123,9 @@ Add the MCP server to your AI assistant configuration:
 ```
 
 > **Important**: Use absolute paths for both the binary and Unity project directory.
+
+## Platform support
+The code is cross platform, but I can't build or test for other platforms, because I only use Windows. If there are platform specific bugs, you have to fix them yourself.
 
 ## 🧪 Development & Testing
 
