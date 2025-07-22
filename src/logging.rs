@@ -42,21 +42,25 @@ fn init_file_logging() {
 
     // Create the directory if it doesn't exist
     if let Err(e) = fs::create_dir_all(&log_dir) {
-        eprintln!("Failed to create log directory: {}", e);
+        //eprintln!("Failed to create log directory: {}", e);
         return;
     }
 
     // Create log file path
     let log_file = log_dir.join("unity_code_mcp.log");
 
-    // Initialize file-based logging
-    let target = Box::new(
-        fs::OpenOptions::new()
-            .create(true)
-            .append(false)
-            .open(&log_file)
-            .expect("Failed to open log file"),
-    );
+    // Try to open the log file, but don't panic if it fails
+    let target = match fs::OpenOptions::new()
+        .create(true)
+        .append(false)
+        .open(&log_file)
+    {
+        Ok(file) => Box::new(file),
+        Err(e) => {
+            //eprintln!("Failed to open log file {}: {}", log_file.display(), e);
+            return;
+        }
+    };
 
     let mut builder = Builder::from_default_env();
     builder
