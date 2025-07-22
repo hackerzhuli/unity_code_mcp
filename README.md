@@ -23,15 +23,14 @@ Unity Code MCP provides **exactly two tools** designed for autonomous code devel
 
 ### 1. **Asset Database Refresh**
 - Triggers Unity compilation and asset processing
-- Returns detailed compilation errors and warnings
+- Returns only compilation errors and nothing else
 - Handles domain reload scenarios gracefully
 - Essential for validating code correctness
 
 ### 2. **Test Execution**
 - Runs Unity tests with comprehensive reporting
-- Provides detailed logs and stack traces for failures
+- Provides stack traces for failures
 - Supports both EditMode and PlayMode tests
-- Critical for verifying code functionality
 
 ### 🚫 What We Don't Include (By Design)
 
@@ -94,7 +93,7 @@ cargo build --release
 ### Step 3: Configure Your AI Assistant
 Add the MCP server to your AI assistant configuration:
 
-**For Claude Desktop:**
+**For Claude Desktop/Cursor/Trae:**
 ```json
 {
   "mcpServers": {
