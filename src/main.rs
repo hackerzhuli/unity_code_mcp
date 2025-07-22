@@ -205,7 +205,7 @@ impl ServerHandler for UnityCodeMcpServer {
     }
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     // Initialize logging
     init_logging();
