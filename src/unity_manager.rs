@@ -642,9 +642,6 @@ impl UnityManager {
                                         result.skip_count = adaptor.skip_count;
                                         result.duration_seconds = adaptor.duration;
                                         result.test_count = adaptor.pass_count + adaptor.fail_count + adaptor.skip_count;
-                                        if let Some(testAdapter) = test_id_to_adapter.get(&adaptor.test_id){
-                                            result.test_count = testAdapter.test_count;
-                                        }
                                         
                                         debug_log!(
                                             "Extracted counts from TestRunFinished: {} passed, {} failed",
