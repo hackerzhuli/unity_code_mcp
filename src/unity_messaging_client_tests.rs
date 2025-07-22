@@ -145,7 +145,7 @@ async fn test_tcp_fallback_integration_with_unity() {
     println!("[TEST] Executing LargeMessageTest to generate large log messages");
     
     // Execute the specific test that generates large messages
-    client.execute_tests("EditMode:TestExecution.Editor.TestExecutionTests.LargeMessageTest").await
+    client.execute_tests("EditMode:TestExecution.Editor.TestWithLargeLog.LargeMessageTest").await
         .expect("Failed to send test execution message");
     
     // Wait for test completion and collect results
