@@ -1,8 +1,8 @@
-use std::fs;
-use std::path::PathBuf;
-use std::io::Write;
-use log::LevelFilter;
 use env_logger::{Builder, Target};
+use log::LevelFilter;
+use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
 
 /// Initialize logging based on whether we're running tests or the main application
 pub fn init_logging() {
@@ -39,23 +39,25 @@ fn init_test_logging() {
 fn init_file_logging() {
     // Get the local app data directory
     let log_dir = get_log_directory();
-    
+
     // Create the directory if it doesn't exist
     if let Err(e) = fs::create_dir_all(&log_dir) {
         eprintln!("Failed to create log directory: {}", e);
         return;
     }
-    
+
     // Create log file path
     let log_file = log_dir.join("unity_code_mcp.log");
-    
+
     // Initialize file-based logging
-    let target = Box::new(fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_file)
-        .expect("Failed to open log file"));
-    
+    let target = Box::new(
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_file)
+            .expect("Failed to open log file"),
+    );
+
     let mut builder = Builder::from_default_env();
     builder
         .target(Target::Pipe(target))
@@ -72,7 +74,7 @@ fn init_file_logging() {
             )
         })
         .init();
-    
+
     log::info!("Logging initialized to file: {}", log_file.display());
 }
 
@@ -121,17 +123,17 @@ macro_rules! error_log {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_log_directory() {
         let log_dir = get_log_directory();
         assert!(log_dir.to_string_lossy().contains("UnityCode"));
     }
-    
+
     #[test]
     fn test_logging_macros() {
         init_logging();
-        
+
         debug_log!("This is a debug message");
         info_log!("This is an info message");
         warn_log!("This is a warning message");

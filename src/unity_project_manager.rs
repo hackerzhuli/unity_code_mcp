@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
-use sysinfo::{System, Pid, ProcessesToUpdate, ProcessRefreshKind};
+use std::path::{Path, PathBuf};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use tokio::fs as async_fs;
 
 #[derive(Debug, Clone)]
@@ -40,19 +40,19 @@ pub enum UnityProjectError {
 
 impl UnityProjectManager {
     /// Creates a new UnityProjectManager with the given project path.
-    /// 
+    ///
     /// This method initializes the manager and attempts to load the Unity version.
     /// The process ID will be None initially and should be updated using `update_process_info()`.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `project_path` - A string representing the absolute path to the Unity project directory
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use unity_code_mcp::UnityProjectManager;
-    /// 
+    ///
     /// let manager = UnityProjectManager::new("/path/to/unity/project".to_string());
     /// ```
     pub async fn new(project_path: String) -> Result<Self, UnityProjectError> {
@@ -62,7 +62,7 @@ impl UnityProjectManager {
             unity_version: None,
             unity_process_id: None,
         };
-        
+
         // Load Unity version during initialization
         if manager.is_unity_project() {
             manager.unity_version = Some(manager.load_unity_editor_version().await?);
@@ -72,12 +72,12 @@ impl UnityProjectManager {
                 manager.project_path.display()
             )));
         }
-        
+
         Ok(manager)
     }
 
     /// Checks if the configured path is a valid Unity project.
-    /// 
+    ///
     /// A valid Unity project must contain:
     /// - `ProjectSettings/ProjectVersion.txt` file
     /// - `Assets/` directory
@@ -94,7 +94,7 @@ impl UnityProjectManager {
     }
 
     /// Loads the Unity Editor version from the project's ProjectVersion.txt file.
-    /// 
+    ///
     /// This is a private method used during initialization to cache the Unity version.
     async fn load_unity_editor_version(&self) -> Result<String, UnityProjectError> {
         let project_version_path = self
@@ -104,23 +104,23 @@ impl UnityProjectManager {
         let content = async_fs::read_to_string(project_version_path).await?;
 
         // Parse the YAML content to extract the version
-        let project_version: ProjectVersion = serde_yaml::from_str(&content)
-            .map_err(|_| UnityProjectError::VersionNotFound)?;
-        
+        let project_version: ProjectVersion =
+            serde_yaml::from_str(&content).map_err(|_| UnityProjectError::VersionNotFound)?;
+
         Ok(project_version.editor_version)
     }
 
     /// Returns the cached Unity Editor version.
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns `Some(String)` with the Unity Editor version if available, `None` otherwise.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```no_run
     /// use unity_code_mcp::UnityProjectManager;
-    /// 
+    ///
     /// #[tokio::main]
     /// async fn main() {
     ///     let project_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject");
@@ -134,25 +134,23 @@ impl UnityProjectManager {
         self.unity_version.as_ref()
     }
 
-
-
     /// Updates the Unity Editor process information by reading the current EditorInstance.json file.
-    /// 
+    ///
     /// This method should be called periodically to keep the process ID information up to date.
     /// It reads the `Library/EditorInstance.json` file and verifies that the process is actually running.
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns `Ok(())` if the process information was successfully updated, or an error if:
     /// - The EditorInstance.json file doesn't exist (no Unity Editor is running)
     /// - The JSON content cannot be parsed
     /// - The process ID in the file doesn't correspond to a running Unity Editor process
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```no_run
     /// use unity_code_mcp::UnityProjectManager;
-    /// 
+    ///
     /// #[tokio::main]
     /// async fn main() {
     ///     let project_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject");
@@ -188,17 +186,17 @@ impl UnityProjectManager {
     }
 
     /// Returns the cached Unity Editor process ID.
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns `Some(u32)` with the process ID if a Unity Editor is currently running for this project,
     /// `None` otherwise. Call `update_process_info()` to refresh this information.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```no_run
     /// use unity_code_mcp::UnityProjectManager;
-    /// 
+    ///
     /// #[tokio::main]
     /// async fn main() {
     ///     let project_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject");
@@ -213,13 +211,15 @@ impl UnityProjectManager {
         self.unity_process_id
     }
 
-
-
     /// Checks if a process with the given PID is running and is Unity.exe
     fn is_unity_process_running(&self, pid: u32) -> bool {
         let mut system = System::new();
-        system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::everything());
-        
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::All,
+            true,
+            ProcessRefreshKind::everything(),
+        );
+
         if let Some(process) = system.process(Pid::from(pid as usize)) {
             let process_name = process.name().to_string_lossy();
             // Check for Unity.exe on Windows, Unity on other platforms
@@ -237,17 +237,17 @@ impl UnityProjectManager {
     }
 
     /// Returns a reference to the project path.
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns a `&Path` reference to the Unity project directory path that was
     /// provided when creating this `UnityProjectManager` instance.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```no_run
     /// use unity_code_mcp::UnityProjectManager;
-    /// 
+    ///
     /// #[tokio::main]
     /// async fn main() {
     ///     let project_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject");
@@ -264,7 +264,7 @@ impl UnityProjectManager {
 #[cfg(test)]
 mod test_utils {
     use std::path::PathBuf;
-    
+
     /// Gets the embedded Unity project path for testing
     pub fn get_unity_project_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject")
@@ -274,8 +274,8 @@ mod test_utils {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test_utils::*;
     use std::path::PathBuf;
+    use test_utils::*;
 
     #[tokio::test]
     async fn test_new_with_embedded_project() {
@@ -283,7 +283,7 @@ mod tests {
         let project_path = get_unity_project_path();
         let result = UnityProjectManager::new(project_path.to_string_lossy().to_string()).await;
         assert!(result.is_ok());
-        
+
         let manager = result.unwrap();
         assert!(manager.unity_version().is_some());
         assert!(manager.unity_process_id().is_none()); // Should be None initially
@@ -295,9 +295,9 @@ mod tests {
         let project_path = PathBuf::from("/tmp");
         let result = UnityProjectManager::new(project_path.to_string_lossy().to_string()).await;
         assert!(result.is_err());
-        
+
         match result {
-            Err(UnityProjectError::NotUnityProject(_)) => {}, // Expected
+            Err(UnityProjectError::NotUnityProject(_)) => {} // Expected
             _ => panic!("Expected NotUnityProject error"),
         }
     }
@@ -305,7 +305,9 @@ mod tests {
     #[tokio::test]
     async fn test_cached_unity_version() {
         let project_path = get_unity_project_path();
-        let manager = UnityProjectManager::new(project_path.to_string_lossy().to_string()).await.unwrap();
+        let manager = UnityProjectManager::new(project_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
 
         let version = manager.unity_version();
         assert!(version.is_some());
@@ -317,14 +319,16 @@ mod tests {
     #[tokio::test]
     async fn test_update_process_info() {
         let project_path = get_unity_project_path();
-        let mut manager = UnityProjectManager::new(project_path.to_string_lossy().to_string()).await.unwrap();
+        let mut manager = UnityProjectManager::new(project_path.to_string_lossy().to_string())
+            .await
+            .unwrap();
 
         // Initially should be None
         assert!(manager.unity_process_id().is_none());
-        
+
         // Try to update process info
         let result = manager.update_process_info().await;
-        
+
         // The result depends on whether Unity Editor is actually running
         // If EditorInstance.json exists but process isn't running, it should fail
         // If no EditorInstance.json exists, it should also fail
@@ -333,7 +337,7 @@ mod tests {
             Ok(()) => {
                 // Unity is running, process ID should be set
                 assert!(manager.unity_process_id().is_some());
-            },
+            }
             Err(_) => {
                 // Unity is not running or EditorInstance.json doesn't exist
                 assert!(manager.unity_process_id().is_none());

@@ -1,33 +1,34 @@
 // Allow warnings, so we don't see so many warnings everytime we run tests or build
 // We will clean up warnings once in a while
-#![allow(warnings)] 
-mod unity_project_manager;
-mod unity_messaging_client;
+#![allow(warnings)]
+mod logging;
+mod test_utils;
 mod unity_manager;
 mod unity_manager_tests;
-mod test_utils;
-mod logging;
+mod unity_messaging_client;
+mod unity_project_manager;
 
-use serde_json::json;
+use crate::logging::init_logging;
+use log::{error, info};
 use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, tool::Parameters},
     model::*,
-    schemars,
-    tool, tool_handler, tool_router,
+    schemars, tool, tool_handler, tool_router,
     transport::stdio,
 };
-use unity_manager::{UnityManager, TestFilter, TestMode};
-use crate::logging::init_logging;
+use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use log::{info, error};
+use unity_manager::{TestFilter, TestMode, UnityManager};
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct RunTestsRequest {
     #[schemars(description = "Test mode to run: EditMode or PlayMode")]
     pub test_mode: String,
-    #[schemars(description = "Optional filter: namespace (Namespace), class name (Namespace.Class), or specific method name (Namespace.Class.Method)")]
+    #[schemars(
+        description = "Optional filter: namespace (Namespace), class name (Namespace.Class), or specific method name (Namespace.Class.Method)"
+    )]
     pub filter: Option<String>,
 }
 
@@ -57,12 +58,18 @@ impl UnityCodeMcpServer {
             match UnityManager::new(self.project_path.clone()).await {
                 Ok(mut manager) => {
                     if let Err(e) = manager.initialize_messaging().await {
-                        return Err(McpError::internal_error(format!("Failed to initialize messaging: {}", e), None));
+                        return Err(McpError::internal_error(
+                            format!("Failed to initialize messaging: {}", e),
+                            None,
+                        ));
                     }
                     *manager_guard = Some(manager);
                 }
                 Err(e) => {
-                    return Err(McpError::internal_error(format!("Failed to create Unity manager: {}", e), None));
+                    return Err(McpError::internal_error(
+                        format!("Failed to create Unity manager: {}", e),
+                        None,
+                    ));
                 }
             }
         }
@@ -70,13 +77,15 @@ impl UnityCodeMcpServer {
     }
 
     /// Refresh Unity asset database and return compilation errors
-    #[tool(description = "Refresh Unity asset database, which also compiles scripts if necessary. Returns error logs including compilation errors if any.")]
+    #[tool(
+        description = "Refresh Unity asset database, which also compiles scripts if necessary. Returns error logs including compilation errors if any."
+    )]
     async fn refresh_asset_database(&self) -> Result<CallToolResult, McpError> {
         self.ensure_unity_manager().await?;
-        
+
         let mut manager_guard = self.unity_manager.lock().await;
         let manager = manager_guard.as_mut().unwrap();
-        
+
         match manager.refresh().await {
             Ok(result) => {
                 let response = json!({
@@ -91,28 +100,38 @@ impl UnityCodeMcpServer {
                     response.to_string(),
                 )]))
             }
-            Err(e) => Err(McpError::internal_error(format!("Failed to refresh asset database: {}", e), None))
+            Err(e) => Err(McpError::internal_error(
+                format!("Failed to refresh asset database: {}", e),
+                None,
+            )),
         }
     }
 
     /// Run Unity tests and return results
-    #[tool(description = "Run Unity tests. Supports EditMode and PlayMode tests with optional filtering.")]
+    #[tool(
+        description = "Run Unity tests. Supports EditMode and PlayMode tests with optional filtering."
+    )]
     async fn run_tests(
         &self,
         Parameters(RunTestsRequest { test_mode, filter }): Parameters<RunTestsRequest>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_unity_manager().await?;
-        
+
         let mut manager_guard = self.unity_manager.lock().await;
         let manager = manager_guard.as_mut().unwrap();
-        
+
         // Parse test mode
         let mode = match test_mode.as_str() {
             "EditMode" => TestMode::EditMode,
             "PlayMode" => TestMode::PlayMode,
-            _ => return Err(McpError::invalid_params("Invalid test mode. Use 'EditMode' or 'PlayMode'", None)),
+            _ => {
+                return Err(McpError::invalid_params(
+                    "Invalid test mode. Use 'EditMode' or 'PlayMode'",
+                    None,
+                ));
+            }
         };
-        
+
         // Parse test filter
         let test_filter = match filter {
             None => TestFilter::All(mode),
@@ -138,7 +157,7 @@ impl UnityCodeMcpServer {
                 }
             }
         };
-        
+
         match manager.run_tests(test_filter).await {
             Ok(result) => {
                 let response = json!({
@@ -160,7 +179,10 @@ impl UnityCodeMcpServer {
                     response.to_string(),
                 )]))
             }
-            Err(e) => Err(McpError::internal_error(format!("Failed to run tests: {}", e), None))
+            Err(e) => Err(McpError::internal_error(
+                format!("Failed to run tests: {}", e),
+                None,
+            )),
         }
     }
 }
@@ -170,9 +192,7 @@ impl ServerHandler for UnityCodeMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             protocol_version: ProtocolVersion::V_2024_11_05,
-            capabilities: ServerCapabilities::builder()
-                .enable_tools()
-                .build(),
+            capabilities: ServerCapabilities::builder().enable_tools().build(),
             server_info: Implementation::from_build_env(),
             instructions: Some("Unity Code MCP Server for Unity Editor integration".into()),
         }
@@ -183,24 +203,26 @@ impl ServerHandler for UnityCodeMcpServer {
 async fn main() -> anyhow::Result<()> {
     // Initialize logging
     init_logging();
-    
+
     // Get Unity project path from environment variable or use default
-    let project_path = std::env::var("UNITY_PROJECT_PATH")
-        .unwrap_or_else(|_| ".".to_string());
-    
-    info!("Starting Unity Code MCP Server for project: {}", project_path);
-    
+    let project_path = std::env::var("UNITY_PROJECT_PATH").unwrap_or_else(|_| ".".to_string());
+
+    info!(
+        "Starting Unity Code MCP Server for project: {}",
+        project_path
+    );
+
     // Create and start the MCP server
     let server = UnityCodeMcpServer::new(project_path);
-    
+
     // Start the MCP server
     let service = server.serve(stdio()).await.inspect_err(|e| {
         error!("serving error: {:?}", e);
     })?;
-    
+
     info!("MCP Server started successfully");
     service.waiting().await?;
     info!("MCP Server stopped");
-    
+
     Ok(())
 }

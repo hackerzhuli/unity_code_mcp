@@ -1,14 +1,16 @@
-use std::collections::{VecDeque, HashSet, HashMap};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
-use tokio::sync::{mpsc, broadcast};
-use tokio::time::timeout;
 use serde::{Deserialize, Serialize};
 use serde_json;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
+use tokio::sync::{broadcast, mpsc};
+use tokio::time::timeout;
 
-use crate::unity_messaging_client::{UnityMessagingClient, UnityEvent, UnityMessagingError, LogLevel};
+use crate::unity_messaging_client::{
+    LogLevel, UnityEvent, UnityMessagingClient, UnityMessagingError,
+};
 use crate::unity_project_manager::{UnityProjectError, UnityProjectManager};
-use crate::{debug_log, info_log, warn_log, error_log};
+use crate::{debug_log, error_log, info_log, warn_log};
 
 /// Result of a refresh operation
 #[derive(Debug, Clone)]
@@ -60,15 +62,9 @@ pub enum TestFilter {
         assembly_name: String,
     },
     /// Execute a specific test by its full name
-    Specific {
-        mode: TestMode,
-        test_name: String,
-    },
+    Specific { mode: TestMode, test_name: String },
     /// Execute tests matching a custom filter string
-    Custom {
-        mode: TestMode,
-        filter: String,
-    },
+    Custom { mode: TestMode, filter: String },
 }
 
 impl TestFilter {
@@ -76,15 +72,18 @@ impl TestFilter {
     pub fn to_filter_string(&self) -> String {
         match self {
             TestFilter::All(mode) => mode.as_str().to_string(),
-            TestFilter::Assembly { mode, assembly_name } => {
+            TestFilter::Assembly {
+                mode,
+                assembly_name,
+            } => {
                 format!("{}:{}", mode.as_str(), assembly_name)
-            },
+            }
             TestFilter::Specific { mode, test_name } => {
                 format!("{}:{}", mode.as_str(), test_name)
-            },
+            }
             TestFilter::Custom { mode, filter } => {
                 format!("{}:{}", mode.as_str(), filter)
-            },
+            }
         }
     }
 }
@@ -140,7 +139,7 @@ impl UnityManager {
     /// Create a new UnityManager for the given Unity project path
     pub async fn new(project_path: String) -> Result<Self, UnityProjectError> {
         let project_manager = UnityProjectManager::new(project_path).await?;
-        
+
         Ok(UnityManager {
             messaging_client: None,
             project_manager,
@@ -153,25 +152,28 @@ impl UnityManager {
     }
 
     /// Initialize the messaging client if Unity is running
-    pub async fn initialize_messaging(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn initialize_messaging(
+        &mut self,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Update process info to check if Unity is running
         self.project_manager.update_process_info().await?;
-        
+
         if let Some(unity_pid) = self.project_manager.unity_process_id() {
             let mut client = UnityMessagingClient::new(unity_pid).await?;
-            
+
             // Subscribe to events before starting listener
             let event_receiver = client.subscribe_to_events();
-            
+
             // Start listening for Unity events
             client.start_listening().await?;
             self.is_listening = true;
-            
+
             self.messaging_client = Some(client);
-            
+
             // Start the log collection task with the event receiver
-            self.start_log_collection_with_receiver(event_receiver).await;
-            
+            self.start_log_collection_with_receiver(event_receiver)
+                .await;
+
             Ok(())
         } else {
             Err("Unity Editor is not running".into())
@@ -179,11 +181,14 @@ impl UnityManager {
     }
 
     /// Start collecting logs from Unity events with a specific receiver
-    async fn start_log_collection_with_receiver(&mut self, mut event_receiver: broadcast::Receiver<UnityEvent>) {
+    async fn start_log_collection_with_receiver(
+        &mut self,
+        mut event_receiver: broadcast::Receiver<UnityEvent>,
+    ) {
         let logs = Arc::clone(&self.logs);
         let seen_logs = Arc::clone(&self.seen_logs);
         let max_logs = self.max_logs;
-        
+
         tokio::spawn(async move {
             //println!("[DEBUG] Log collection task started");
             loop {
@@ -194,45 +199,48 @@ impl UnityManager {
                             UnityEvent::LogMessage { level, message } => {
                                 // Create a unique key for deduplication (message only)
                                 let log_key = message.clone();
-                                
+
                                 // Check if we've already seen this exact log
                                 let is_duplicate = if let Ok(mut seen_guard) = seen_logs.lock() {
                                     !seen_guard.insert(log_key)
                                 } else {
                                     false
                                 };
-                                
+
                                 if !is_duplicate {
                                     let log_entry = UnityLogEntry {
-                                    timestamp: SystemTime::now(),
-                                    level: level.clone(),
-                                    message: message.clone(),
-                                };
-                                    
-                                    debug_log!("Adding log entry: [{:?}] {}", log_entry.level, log_entry.message);
-                                    
+                                        timestamp: SystemTime::now(),
+                                        level: level.clone(),
+                                        message: message.clone(),
+                                    };
+
+                                    debug_log!(
+                                        "Adding log entry: [{:?}] {}",
+                                        log_entry.level,
+                                        log_entry.message
+                                    );
+
                                     if let Ok(mut logs_guard) = logs.lock() {
                                         logs_guard.push_back(log_entry);
-                                        
+
                                         // Keep only the last max_logs entries
                                         while logs_guard.len() > max_logs {
                                             logs_guard.pop_front();
                                         }
-                                        
+
                                         //println!("[DEBUG] Total logs now: {}", logs_guard.len());
                                     }
                                 } else {
                                     //println!("[DEBUG] Skipping duplicate log: [{:?}] {}", level, message);
                                 }
-                            },
-                            _ => {
                             }
+                            _ => {}
                         }
-                    },
+                    }
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
                         warn_log!("Log collection lagged, skipped {} messages", skipped);
                         continue;
-                    },
+                    }
                     Err(broadcast::error::RecvError::Closed) => {
                         debug_log!("Log collection channel closed, exiting task");
                         break;
@@ -250,8 +258,6 @@ impl UnityManager {
             Vec::new()
         }
     }
-
-
 
     /// Clear all collected logs
     pub fn clear_logs(&self) {
@@ -274,51 +280,61 @@ impl UnityManager {
 
     /// Check if Unity is currently online
     pub fn is_unity_online(&self) -> bool {
-        self.messaging_client.as_ref()
+        self.messaging_client
+            .as_ref()
             .map(|client| client.is_online())
             .unwrap_or(false)
     }
 
     /// Check if Unity is currently connected and responsive
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `timeout_seconds` - Maximum age of last response to consider Unity connected (default: 10 seconds)
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns `true` if Unity has responded within the timeout period, `false` otherwise
     pub fn is_unity_connected(&self, timeout_seconds: Option<u64>) -> bool {
-        self.messaging_client.as_ref()
+        self.messaging_client
+            .as_ref()
             .map(|client| client.is_connected(timeout_seconds))
             .unwrap_or(false)
     }
 
     /// Send a ping to Unity
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns `Ok(())` if the ping was sent successfully
     pub async fn send_ping(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &self.messaging_client {
-            client.send_ping().await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+            client
+                .send_ping()
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         } else {
             Err("Messaging client not initialized".into())
         }
     }
 
     /// Get Unity package version (not Unity Editor version)
-    pub async fn get_unity_version(&mut self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_unity_version(
+        &mut self,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &mut self.messaging_client {
             // Subscribe to events before sending request
             let mut event_receiver = client.subscribe_to_events();
-            
+
             // Send the version request
-            client.get_version().await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            
+            client
+                .get_version()
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+
             // Wait for the PackageVersion event response
             let timeout_duration = Duration::from_secs(10);
-            
+
             match timeout(timeout_duration, async {
                 loop {
                     match event_receiver.recv().await {
@@ -327,7 +343,9 @@ impl UnityManager {
                         Err(_) => return Err("Event channel closed".into()),
                     }
                 }
-            }).await {
+            })
+            .await
+            {
                 Ok(result) => result,
                 Err(_) => Err("Timeout waiting for Unity version response".into()),
             }
@@ -337,17 +355,22 @@ impl UnityManager {
     }
 
     /// Get Unity project path
-    pub async fn get_project_path(&mut self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_project_path(
+        &mut self,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &mut self.messaging_client {
             // Subscribe to events before sending request
             let mut event_receiver = client.subscribe_to_events();
-            
+
             // Send the project path request
-            client.get_project_path().await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            
+            client
+                .get_project_path()
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+
             // Wait for the ProjectPath event response
             let timeout_duration = Duration::from_secs(10);
-            
+
             match timeout(timeout_duration, async {
                 loop {
                     match event_receiver.recv().await {
@@ -356,7 +379,9 @@ impl UnityManager {
                         Err(_) => return Err("Event channel closed".into()),
                     }
                 }
-            }).await {
+            })
+            .await
+            {
                 Ok(result) => result,
                 Err(_) => Err("Timeout waiting for Unity project path response".into()),
             }
@@ -366,15 +391,18 @@ impl UnityManager {
     }
 
     /// Wait for Unity to become online
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `timeout_seconds` - Maximum time to wait for Unity to become online
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns `Ok(())` if Unity becomes online within the timeout period, `Err` otherwise
-    pub async fn wait_online(&mut self, timeout_seconds: u64) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn wait_online(
+        &mut self,
+        timeout_seconds: u64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &mut self.messaging_client {
             for _ in 0..timeout_seconds * 10 {
                 if client.is_online() {
@@ -391,30 +419,42 @@ impl UnityManager {
     /// Send refresh message to Unity (this is the simple variant that just sends the message)
     pub async fn refresh_unity(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &mut self.messaging_client {
-            client.send_refresh_message(Some(60)).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+            client
+                .send_refresh_message(Some(60))
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         } else {
             Err("Messaging client not initialized".into())
         }
     }
 
     /// Execute tests based on the specified filter
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `filter` - The test filter specifying which tests to execute
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns a TestExecutionResult containing information about the test execution
-    pub async fn run_tests(&mut self, filter: TestFilter) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn run_tests(
+        &mut self,
+        filter: TestFilter,
+    ) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &mut self.messaging_client {
             // Subscribe to events before sending request
             let mut event_receiver = client.subscribe_to_events();
-            
+
             // Send the test execution request directly - TestStarted events will provide the mapping
-            debug_log!("Sending test filter to Unity: '{}'", filter.to_filter_string());
-            client.execute_tests(filter).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            
+            debug_log!(
+                "Sending test filter to Unity: '{}'",
+                filter.to_filter_string()
+            );
+            client
+                .execute_tests(filter)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+
             // Collect test execution events
             let mut result = TestExecutionResult {
                 test_results: Vec::new(),
@@ -422,13 +462,13 @@ impl UnityManager {
                 pass_count: 0,
                 fail_count: 0,
             };
-            
+
             // Temporary mapping from TestId to test full name for building SimpleTestResult
             let mut test_id_to_name: HashMap<String, String> = HashMap::new();
-            
+
             let timeout_duration = Duration::from_secs(300); // 5 minutes for test execution
             let start_time = std::time::Instant::now();
-            
+
             // Wait for test execution to complete
             while start_time.elapsed() < timeout_duration {
                 match timeout(Duration::from_secs(10), event_receiver.recv()).await {
@@ -436,39 +476,71 @@ impl UnityManager {
                         debug_log!("Received event: {:?}", std::mem::discriminant(&event));
                         match event {
                             UnityEvent::TestRunStarted(container) => {
-                                debug_log!("Test run started with {} test adaptors", container.test_adaptors.len());
-                                
+                                debug_log!(
+                                    "Test run started with {} test adaptors",
+                                    container.test_adaptors.len()
+                                );
+
                                 // Build test ID to name mapping from test run started data
                                 for adaptor in &container.test_adaptors {
-                                    debug_log!("TestRunStarted adaptor - Id: '{}', Name: '{}', FullName: '{}', Type: {:?}", 
-                                        adaptor.id, adaptor.name, adaptor.full_name, adaptor.test_type);
-                                    test_id_to_name.insert(adaptor.id.clone(), adaptor.full_name.clone());
+                                    debug_log!(
+                                        "TestRunStarted adaptor - Id: '{}', Name: '{}', FullName: '{}', Type: {:?}",
+                                        adaptor.id,
+                                        adaptor.name,
+                                        adaptor.full_name,
+                                        adaptor.test_type
+                                    );
+                                    test_id_to_name
+                                        .insert(adaptor.id.clone(), adaptor.full_name.clone());
                                 }
-                            },
+                            }
                             UnityEvent::TestStarted(container) => {
-                                debug_log!("Test started with {} test adaptors", container.test_adaptors.len());
-                                
+                                debug_log!(
+                                    "Test started with {} test adaptors",
+                                    container.test_adaptors.len()
+                                );
+
                                 // Build test ID to name mapping from parsed data
                                 for adaptor in &container.test_adaptors {
-                                    debug_log!("TestStarted adaptor - Id: '{}', Name: '{}', FullName: '{}', Type: {:?}", 
-                                        adaptor.id, adaptor.name, adaptor.full_name, adaptor.test_type);
-                                    test_id_to_name.insert(adaptor.id.clone(), adaptor.full_name.clone());
+                                    debug_log!(
+                                        "TestStarted adaptor - Id: '{}', Name: '{}', FullName: '{}', Type: {:?}",
+                                        adaptor.id,
+                                        adaptor.name,
+                                        adaptor.full_name,
+                                        adaptor.test_type
+                                    );
+                                    test_id_to_name
+                                        .insert(adaptor.id.clone(), adaptor.full_name.clone());
                                 }
-                                debug_log!("Total mappings in test_id_to_name: {}", test_id_to_name.len());
-                            },
+                                debug_log!(
+                                    "Total mappings in test_id_to_name: {}",
+                                    test_id_to_name.len()
+                                );
+                            }
                             UnityEvent::TestFinished(container) => {
-                                debug_log!("Test finished with {} test result adaptors", container.test_result_adaptors.len());
-                                
+                                debug_log!(
+                                    "Test finished with {} test result adaptors",
+                                    container.test_result_adaptors.len()
+                                );
+
                                 // Extract individual test results from parsed data
                                 for adaptor in &container.test_result_adaptors {
-                                    debug_log!("TestFinished adaptor - TestId: '{}', PassCount: {}, FailCount: {}, ResultState: '{}'", 
-                                        adaptor.test_id, adaptor.pass_count, adaptor.fail_count, adaptor.result_state);
-                                    
+                                    debug_log!(
+                                        "TestFinished adaptor - TestId: '{}', PassCount: {}, FailCount: {}, ResultState: '{}'",
+                                        adaptor.test_id,
+                                        adaptor.pass_count,
+                                        adaptor.fail_count,
+                                        adaptor.result_state
+                                    );
+
                                     // Create SimpleTestResult from TestResultAdaptor
-                                    let full_name = test_id_to_name.get(&adaptor.test_id)
+                                    let full_name = test_id_to_name
+                                        .get(&adaptor.test_id)
                                         .cloned()
-                                        .unwrap_or_else(|| format!("Unknown test (ID: {})", adaptor.test_id));
-                                    
+                                        .unwrap_or_else(|| {
+                                            format!("Unknown test (ID: {})", adaptor.test_id)
+                                        });
+
                                     let simple_result = SimpleTestResult {
                                         full_name,
                                         stack_trace: adaptor.stack_trace.clone(),
@@ -477,40 +549,43 @@ impl UnityManager {
                                         message: adaptor.message.clone(),
                                         output: adaptor.output.clone(),
                                     };
-                                    
+
                                     result.test_results.push(simple_result);
                                 }
-                            },
+                            }
                             UnityEvent::TestRunFinished(container) => {
                                 debug_log!("Test run finished");
-                                
+
                                 // Only process the first TestRunFinished event to avoid accumulation
                                 if !result.execution_completed {
                                     result.execution_completed = true;
-                                    
+
                                     // Extract pass/fail counts from parsed data
                                     if let Some(adaptor) = container.test_result_adaptors.first() {
                                         result.pass_count = adaptor.pass_count;
                                         result.fail_count = adaptor.fail_count;
-                                        debug_log!("Extracted counts from TestRunFinished: {} passed, {} failed", 
-                                            adaptor.pass_count, adaptor.fail_count);
+                                        debug_log!(
+                                            "Extracted counts from TestRunFinished: {} passed, {} failed",
+                                            adaptor.pass_count,
+                                            adaptor.fail_count
+                                        );
                                     } else {
                                         debug_log!("No test result adaptors in TestRunFinished");
                                     }
                                 }
                                 break;
-                            },
+                            }
                             UnityEvent::TestListRetrieved(_test_list) => {
                                 // Test list is no longer stored in TestExecutionResult
-                            },
+                            }
                             _ => {
                                 // Ignore other events during test execution
                             }
                         }
-                    },
+                    }
                     Ok(Err(_)) => {
                         return Err("Event channel closed during test execution".into());
-                    },
+                    }
                     Err(_) => {
                         // Timeout on individual event - check if we should continue waiting
                         if result.execution_completed {
@@ -520,11 +595,11 @@ impl UnityManager {
                     }
                 }
             }
-            
+
             if !result.execution_completed {
                 return Err("Timeout waiting for test execution to complete".into());
             }
-            
+
             Ok(result)
         } else {
             Err("Messaging client not initialized".into())
@@ -532,66 +607,90 @@ impl UnityManager {
     }
 
     /// Execute all tests in the specified mode
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `test_mode` - The test mode to execute all tests for
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns a TestExecutionResult containing information about the test execution
-    pub async fn execute_all_tests(&mut self, test_mode: TestMode) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn execute_all_tests(
+        &mut self,
+        test_mode: TestMode,
+    ) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
         self.run_tests(TestFilter::All(test_mode)).await
     }
 
     /// Execute tests in a specific assembly
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `test_mode` - The test mode
     /// * `assembly_name` - The name of the assembly (e.g., "MyTests.dll")
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns a TestExecutionResult containing information about the test execution
-    pub async fn execute_assembly_tests(&mut self, test_mode: TestMode, assembly_name: String) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
-        self.run_tests(TestFilter::Assembly { mode: test_mode, assembly_name }).await
+    pub async fn execute_assembly_tests(
+        &mut self,
+        test_mode: TestMode,
+        assembly_name: String,
+    ) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
+        self.run_tests(TestFilter::Assembly {
+            mode: test_mode,
+            assembly_name,
+        })
+        .await
     }
 
     /// Execute a specific test by its full name
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `test_mode` - The test mode
     /// * `test_name` - The full name of the test (e.g., "MyNamespace.MyTestClass.MyTestMethod")
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns a TestExecutionResult containing information about the test execution
-    pub async fn execute_specific_test(&mut self, test_mode: TestMode, test_name: String) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
-        self.run_tests(TestFilter::Specific { mode: test_mode, test_name }).await
+    pub async fn execute_specific_test(
+        &mut self,
+        test_mode: TestMode,
+        test_name: String,
+    ) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
+        self.run_tests(TestFilter::Specific {
+            mode: test_mode,
+            test_name,
+        })
+        .await
     }
 
     /// Send refresh message and collect error logs during compilation
-    /// 
+    ///
     /// This method sends a refresh message to Unity, waits for a refresh response,
     /// then waits for compilation events while collecting all error logs received
     /// after the initial refresh message was sent.
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns a RefreshResult containing comprehensive information about the refresh operation
-    pub async fn refresh(&mut self) -> Result<RefreshResult, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn refresh(
+        &mut self,
+    ) -> Result<RefreshResult, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &mut self.messaging_client {
             // Subscribe to events before sending request
             let mut event_receiver = client.subscribe_to_events();
-            
+
             let operation_start = std::time::Instant::now();
-            
+
             // Send the refresh message, allow 60 seconds to send
-            client.send_refresh_message(Some(60)).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+            client
+                .send_refresh_message(Some(60))
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             //println!("[DEBUG] Refresh message sent");
-            
+
             // refresh start should be when we actually send the message
             let refresh_start_time = SystemTime::now();
 
@@ -600,10 +699,10 @@ impl UnityManager {
             let mut refresh_error_message: Option<String> = None;
             let mut compilation_started = false;
             let mut compilation_finished = false;
-            
+
             let timeout_duration = Duration::from_secs(60); // 1 minute total timeout
             let start_time = std::time::Instant::now();
-            
+
             // Wait for refresh response first
             while start_time.elapsed() < timeout_duration && !refresh_response_received {
                 match timeout(Duration::from_secs(10), event_receiver.recv()).await {
@@ -612,12 +711,12 @@ impl UnityManager {
                             UnityEvent::RefreshCompleted(message) => {
                                 debug_log!("Refresh completed with message: '{}'", message);
                                 refresh_response_received = true;
-                                
+
                                 // Check if refresh failed (non-empty message indicates error)
                                 if !message.is_empty() {
                                     refresh_error_message = Some(message.clone());
                                     error_log!("Refresh failed: {}", message);
-                                    
+
                                     // Return early with error result
                                     let duration = operation_start.elapsed().as_secs_f64();
                                     return Ok(RefreshResult {
@@ -629,21 +728,21 @@ impl UnityManager {
                                         duration_seconds: duration,
                                     });
                                 }
-                            },
+                            }
                             _ => {
                                 // Ignore other events while waiting for refresh response
                             }
                         }
-                    },
+                    }
                     Ok(Err(_)) => {
                         return Err("Event channel closed during refresh".into());
-                    },
+                    }
                     Err(_) => {
                         // Timeout on individual event - continue waiting
                     }
                 }
             }
-            
+
             if !refresh_response_received {
                 let duration = operation_start.elapsed().as_secs_f64();
                 return Ok(RefreshResult {
@@ -655,31 +754,32 @@ impl UnityManager {
                     duration_seconds: duration,
                 });
             }
-            
+
             // Wait for compilation started event for 3 seconds
             let compilation_wait_start = std::time::Instant::now();
-            while compilation_wait_start.elapsed() < Duration::from_secs(3) && !compilation_started {
+            while compilation_wait_start.elapsed() < Duration::from_secs(3) && !compilation_started
+            {
                 match timeout(Duration::from_millis(100), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
                         match event {
                             UnityEvent::CompilationStarted => {
                                 debug_log!("Compilation started");
                                 compilation_started = true;
-                            },
+                            }
                             _ => {
                                 // Ignore other events
                             }
                         }
-                    },
+                    }
                     Ok(Err(_)) => {
                         return Err("Event channel closed during compilation wait".into());
-                    },
+                    }
                     Err(_) => {
                         // Timeout on individual event - continue waiting
                     }
                 }
             }
-            
+
             // If compilation started, wait for compilation finished for 60 seconds
             if compilation_started {
                 while start_time.elapsed() < timeout_duration && !compilation_finished {
@@ -689,57 +789,63 @@ impl UnityManager {
                                 UnityEvent::CompilationFinished => {
                                     debug_log!("Compilation finished");
                                     compilation_finished = true;
-                                },
+                                }
                                 _ => {
                                     // Ignore other events
                                 }
                             }
-                        },
+                        }
                         Ok(Err(_)) => {
                             return Err("Event channel closed during compilation".into());
-                        },
+                        }
                         Err(_) => {
                             // Timeout on individual event - continue waiting
                         }
                     }
                 }
-                
+
                 if !compilation_finished {
                     let duration = operation_start.elapsed().as_secs_f64();
                     return Ok(RefreshResult {
                         refresh_completed: false,
-                        refresh_error_message: Some("Timeout waiting for compilation to finish after 60 seconds".to_string()),
+                        refresh_error_message: Some(
+                            "Timeout waiting for compilation to finish after 60 seconds"
+                                .to_string(),
+                        ),
                         compilation_started: true,
                         compilation_completed: false,
                         error_logs: Vec::new(),
                         duration_seconds: duration,
                     });
                 }
-                
+
                 // Wait additional time for error logs to arrive after compilation finishes
                 debug_log!("Waiting 2 seconds for error logs after compilation finished");
                 tokio::time::sleep(Duration::from_secs(2)).await;
             } else {
                 debug_log!("No compilation started within 5 seconds");
             }
-            
+
             // Filter error logs from the existing log collection based on timestamp
-            let error_logs: Vec<String> = self.get_logs()
+            let error_logs: Vec<String> = self
+                .get_logs()
                 .into_iter()
-                .filter(|log| {
-                    log.level == LogLevel::Error && log.timestamp >= refresh_start_time
-                })
+                .filter(|log| log.level == LogLevel::Error && log.timestamp >= refresh_start_time)
                 .map(|log| log.message)
                 .collect();
-            
+
             let duration = operation_start.elapsed().as_secs_f64();
-            debug_log!("Refresh completed, collected {} error logs in {:.2} seconds", error_logs.len(), duration);
-            
+            debug_log!(
+                "Refresh completed, collected {} error logs in {:.2} seconds",
+                error_logs.len(),
+                duration
+            );
+
             Ok(RefreshResult {
                 refresh_completed: true,
                 refresh_error_message: None,
-                compilation_started:true,
-                compilation_completed:true,
+                compilation_started: true,
+                compilation_completed: true,
                 error_logs,
                 duration_seconds: duration,
             })
@@ -756,10 +862,10 @@ impl UnityManager {
         self.is_listening = false;
         self.messaging_client = None;
         self.event_receiver = None;
-        
+
         // Clear all logs and seen logs to prevent state leakage between test runs
         self.clear_logs();
-        
+
         // Add a small delay to ensure Unity has time to fully shut down
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

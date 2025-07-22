@@ -33,7 +33,7 @@ pub fn cleanup_test_uss_file(uss_path: &std::path::Path) {
             eprintln!("Warning: Failed to delete test USS file: {}", e);
         }
     }
-    
+
     // Also delete the .meta file to ensure if we create the uss file again
     // unity will treat it as a new file
     let meta_path = uss_path.with_extension("uss.meta");
@@ -46,7 +46,10 @@ pub fn cleanup_test_uss_file(uss_path: &std::path::Path) {
 
 /// Creates a C# script to trigger Unity compilation
 pub fn create_test_cs_script(project_path: &std::path::Path) -> std::path::PathBuf {
-    let cs_path = project_path.join("Assets").join("Scripts").join("TestCompilation.cs");
+    let cs_path = project_path
+        .join("Assets")
+        .join("Scripts")
+        .join("TestCompilation.cs");
     let cs_content = r#"using UnityEngine;
 
 namespace UnityProject
@@ -66,13 +69,13 @@ namespace UnityProject
     }
 }
 "#;
-    
+
     // Ensure the Scripts directory exists
     let scripts_dir = cs_path.parent().unwrap();
     if !scripts_dir.exists() {
         std::fs::create_dir_all(scripts_dir).expect("Failed to create Scripts directory");
     }
-    
+
     std::fs::write(&cs_path, cs_content).expect("Failed to create test C# script");
     cs_path
 }
@@ -84,7 +87,7 @@ pub fn cleanup_test_cs_script(cs_path: &std::path::Path) {
             eprintln!("Warning: Failed to delete test C# script: {}", e);
         }
     }
-    
+
     // Also delete the .meta file to ensure Unity recognizes the change
     let meta_path = cs_path.with_extension("cs.meta");
     if meta_path.exists() {
@@ -96,7 +99,10 @@ pub fn cleanup_test_cs_script(cs_path: &std::path::Path) {
 
 /// Creates a C# script with compilation errors to trigger Unity compilation errors
 pub fn create_test_cs_script_with_errors(project_path: &std::path::Path) -> std::path::PathBuf {
-    let cs_path = project_path.join("Assets").join("Scripts").join("TestCompilationErrors.cs");
+    let cs_path = project_path
+        .join("Assets")
+        .join("Scripts")
+        .join("TestCompilationErrors.cs");
     let cs_content = r#"using UnityEngine;
 using NonExistentNamespace; // This will cause a compilation error
 
@@ -127,13 +133,13 @@ namespace UnityProject
     }
 }
 "#;
-    
+
     // Ensure the Scripts directory exists
     let scripts_dir = cs_path.parent().unwrap();
     if !scripts_dir.exists() {
         std::fs::create_dir_all(scripts_dir).expect("Failed to create Scripts directory");
     }
-    
+
     std::fs::write(&cs_path, cs_content).expect("Failed to create test C# script with errors");
     cs_path
 }
@@ -142,15 +148,21 @@ namespace UnityProject
 pub fn cleanup_test_cs_script_with_errors(cs_path: &std::path::Path) {
     if cs_path.exists() {
         if let Err(e) = std::fs::remove_file(cs_path) {
-            eprintln!("Warning: Failed to delete test C# script with errors: {}", e);
+            eprintln!(
+                "Warning: Failed to delete test C# script with errors: {}",
+                e
+            );
         }
     }
-    
+
     // Also delete the .meta file to ensure Unity recognizes the change
     let meta_path = cs_path.with_extension("cs.meta");
     if meta_path.exists() {
         if let Err(e) = std::fs::remove_file(&meta_path) {
-            eprintln!("Warning: Failed to delete test C# script with errors .meta file: {}", e);
+            eprintln!(
+                "Warning: Failed to delete test C# script with errors .meta file: {}",
+                e
+            );
         }
     }
 }
