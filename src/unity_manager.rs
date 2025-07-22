@@ -577,7 +577,132 @@ impl UnityManager {
         self.execute_tests(TestFilter::Specific { mode: test_mode, test_name }).await
     }
 
-
+    /// Send refresh message and collect error logs during compilation
+    /// 
+    /// This method sends a refresh message to Unity, waits for a refresh response,
+    /// then waits for compilation events while collecting all error logs received
+    /// after the initial refresh message was sent.
+    /// 
+    /// # Returns
+    /// 
+    /// Returns a vector of error log messages received during the refresh process
+    pub async fn refresh(&mut self) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(client) = &mut self.messaging_client {
+            // Subscribe to events before sending request
+            let mut event_receiver = client.subscribe_to_events();
+            
+            // Record the start time to filter logs by timestamp
+            let refresh_start_time = SystemTime::now();
+            
+            // Send the refresh message
+            client.send_refresh_message().await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+            println!("[DEBUG] Refresh message sent");
+            
+            // Track refresh process state
+            let mut refresh_response_received = false;
+            let mut compilation_started = false;
+            let mut compilation_finished = false;
+            
+            let timeout_duration = Duration::from_secs(60); // 1 minute total timeout
+            let start_time = std::time::Instant::now();
+            
+            // Wait for refresh response first
+            while start_time.elapsed() < timeout_duration && !refresh_response_received {
+                match timeout(Duration::from_secs(10), event_receiver.recv()).await {
+                    Ok(Ok(event)) => {
+                        match event {
+                            UnityEvent::RefreshCompleted => {
+                                println!("[DEBUG] Refresh completed");
+                                refresh_response_received = true;
+                            },
+                            _ => {
+                                // Ignore other events while waiting for refresh response
+                            }
+                        }
+                    },
+                    Ok(Err(_)) => {
+                        return Err("Event channel closed during refresh".into());
+                    },
+                    Err(_) => {
+                        // Timeout on individual event - continue waiting
+                    }
+                }
+            }
+            
+            if !refresh_response_received {
+                return Err("Timeout waiting for refresh response".into());
+            }
+            
+            // Wait for compilation started event for 5 seconds
+            let compilation_wait_start = std::time::Instant::now();
+            while compilation_wait_start.elapsed() < Duration::from_secs(5) && !compilation_started {
+                match timeout(Duration::from_millis(100), event_receiver.recv()).await {
+                    Ok(Ok(event)) => {
+                        match event {
+                            UnityEvent::CompilationStarted => {
+                                println!("[DEBUG] Compilation started");
+                                compilation_started = true;
+                            },
+                            _ => {
+                                // Ignore other events
+                            }
+                        }
+                    },
+                    Ok(Err(_)) => {
+                        return Err("Event channel closed during compilation wait".into());
+                    },
+                    Err(_) => {
+                        // Timeout on individual event - continue waiting
+                    }
+                }
+            }
+            
+            // If compilation started, wait for compilation finished
+            if compilation_started {
+                while start_time.elapsed() < timeout_duration && !compilation_finished {
+                    match timeout(Duration::from_secs(10), event_receiver.recv()).await {
+                        Ok(Ok(event)) => {
+                            match event {
+                                UnityEvent::CompilationFinished => {
+                                    println!("[DEBUG] Compilation finished");
+                                    compilation_finished = true;
+                                },
+                                _ => {
+                                    // Ignore other events
+                                }
+                            }
+                        },
+                        Ok(Err(_)) => {
+                            return Err("Event channel closed during compilation".into());
+                        },
+                        Err(_) => {
+                            // Timeout on individual event - continue waiting
+                        }
+                    }
+                }
+                
+                if !compilation_finished {
+                    return Err("Timeout waiting for compilation to finish".into());
+                }
+            } else {
+                println!("[DEBUG] No compilation started within 5 seconds");
+            }
+            
+            // Filter error logs from the existing log collection based on timestamp
+            let error_logs: Vec<String> = self.get_logs()
+                .into_iter()
+                .filter(|log| {
+                    log.level == LogLevel::Error && log.timestamp >= refresh_start_time
+                })
+                .map(|log| log.message)
+                .collect();
+            
+            println!("[DEBUG] Refresh completed, collected {} error logs", error_logs.len());
+            Ok(error_logs)
+        } else {
+            Err("Messaging client not initialized".into())
+        }
+    }
 
     /// Stop the messaging client and cleanup
     pub async fn shutdown(&mut self) {

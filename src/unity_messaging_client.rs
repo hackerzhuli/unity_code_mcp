@@ -38,6 +38,7 @@ pub enum MessageType {
     Online = 102,
     Offline = 103,
     IsPlaying = 104,
+    CompilationStarted = 105,
 }
 
 impl From<i32> for MessageType {
@@ -70,6 +71,7 @@ impl From<i32> for MessageType {
             102 => MessageType::Online,
             103 => MessageType::Offline,
             104 => MessageType::IsPlaying,
+            105 => MessageType::CompilationStarted,
             _ => MessageType::None,
         }
     }
@@ -178,6 +180,10 @@ pub enum UnityEvent {
     TestListRetrieved(String),
     /// Compilation finished
     CompilationFinished,
+    /// Compilation started
+    CompilationStarted,
+    /// Refresh completed
+    RefreshCompleted,
     /// Unity went online
     Online,
     /// Unity went offline
@@ -450,6 +456,10 @@ impl UnityMessagingClient {
             
             // Compilation messages
             MessageType::CompilationFinished => Some(UnityEvent::CompilationFinished),
+            MessageType::CompilationStarted => Some(UnityEvent::CompilationStarted),
+            
+            // Refresh messages
+            MessageType::Refresh => Some(UnityEvent::RefreshCompleted),
             
             // Internal messages (don't broadcast)
             MessageType::Ping | MessageType::Pong => None,

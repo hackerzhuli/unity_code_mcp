@@ -93,3 +93,64 @@ pub fn cleanup_test_cs_script(cs_path: &std::path::Path) {
         }
     }
 }
+
+/// Creates a C# script with compilation errors to trigger Unity compilation errors
+pub fn create_test_cs_script_with_errors(project_path: &std::path::Path) -> std::path::PathBuf {
+    let cs_path = project_path.join("Assets").join("Scripts").join("TestCompilationErrors.cs");
+    let cs_content = r#"using UnityEngine;
+using NonExistentNamespace; // This will cause a compilation error
+
+namespace UnityProject
+{
+    /// <summary>
+    /// A test script with intentional compilation errors.
+    /// </summary>
+    public class TestCompilationErrors : MonoBehaviour
+    {
+        /// <summary>
+        /// A method with compilation errors.
+        /// </summary>
+        public void TestMethodWithErrors()
+        {
+            // Undefined variable - compilation error
+            undefinedVariable = 42;
+            
+            // Invalid method call - compilation error
+            NonExistentClass.DoSomething();
+            
+            // Syntax error - missing semicolon
+            Debug.Log("This line is missing a semicolon")
+        }
+        
+        // Invalid property syntax - compilation error
+        public int InvalidProperty { get set; }
+    }
+}
+"#;
+    
+    // Ensure the Scripts directory exists
+    let scripts_dir = cs_path.parent().unwrap();
+    if !scripts_dir.exists() {
+        std::fs::create_dir_all(scripts_dir).expect("Failed to create Scripts directory");
+    }
+    
+    std::fs::write(&cs_path, cs_content).expect("Failed to create test C# script with errors");
+    cs_path
+}
+
+/// Deletes the test C# script with errors and its .meta file
+pub fn cleanup_test_cs_script_with_errors(cs_path: &std::path::Path) {
+    if cs_path.exists() {
+        if let Err(e) = std::fs::remove_file(cs_path) {
+            eprintln!("Warning: Failed to delete test C# script with errors: {}", e);
+        }
+    }
+    
+    // Also delete the .meta file to ensure Unity recognizes the change
+    let meta_path = cs_path.with_extension("cs.meta");
+    if meta_path.exists() {
+        if let Err(e) = std::fs::remove_file(&meta_path) {
+            eprintln!("Warning: Failed to delete test C# script with errors .meta file: {}", e);
+        }
+    }
+}

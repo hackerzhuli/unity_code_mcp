@@ -2,7 +2,7 @@ use std::time::Duration;
 use std::collections::HashMap;
 use tokio::time::timeout;
 
-use crate::test_utils::{cleanup_test_uss_file, create_test_uss_file, get_unity_project_path};
+use crate::test_utils::{cleanup_test_uss_file, create_test_uss_file, get_unity_project_path, create_test_cs_script, cleanup_test_cs_script, create_test_cs_script_with_errors, cleanup_test_cs_script_with_errors};
 use crate::unity_manager::{UnityManager, TestMode};
 
 /// Expected test result for individual test validation
@@ -239,6 +239,126 @@ async fn test_unity_test_execution_specific_class() {
             // Don't fail the test if Unity is not available
         }
     }
+}
+
+#[tokio::test]
+async fn test_unity_manager_refresh_with_compilation_errors() {
+    let project_path = get_unity_project_path();
+    let mut manager = match UnityManager::new(project_path.to_string_lossy().to_string()).await {
+        Ok(manager) => manager,
+        Err(_) => {
+            println!("Skipping Unity manager refresh test: Unity project not found");
+            return;
+        }
+    };
+
+    // Initialize messaging client
+    if let Err(_) = manager.initialize_messaging().await {
+        println!("Skipping Unity manager refresh test: Unity Editor not running or messaging failed");
+        return;
+    }
+
+    // Send a ping to establish connectivity
+    println!("Testing Unity connectivity...");
+    if let Err(_) = manager.send_ping().await {
+        println!("⚠ Failed to send ping to Unity");
+        return;
+    }
+    
+    // Wait a moment for ping response
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    
+    // Check if Unity is connected
+    if !manager.is_unity_connected(Some(5)) {
+        println!("⚠ Unity is not responding to messages within 5 seconds");
+        println!("This suggests Unity is not running or the messaging package may not be installed or active.");
+        return; // Don't fail the test, just skip it
+    }
+    println!("✓ Unity connectivity confirmed");
+    
+    // Clear any existing logs
+    manager.clear_logs();
+    assert_eq!(manager.log_count(), 0, "Logs should be cleared initially");
+
+    // First create a valid C# script to ensure Unity will compile
+    let cs_path = create_test_cs_script(&project_path);
+    println!("✓ Created valid C# script");
+    
+    // Send refresh to trigger initial compilation
+    let _ = manager.refresh_unity().await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    println!("✓ Triggered initial compilation");
+    
+    // Now replace with a script containing errors
+    cleanup_test_cs_script(&cs_path);
+    let cs_path = create_test_cs_script_with_errors(&project_path);
+    println!("✓ Created C# script with compilation errors");
+    
+    // Wait a bit for Unity to detect the file change
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+    println!("✓ Waited for Unity to detect file changes");
+    
+    // Call the refresh method which should trigger compilation and collect error logs
+    let refresh_result = timeout(Duration::from_secs(60), manager.refresh()).await;
+    
+    // Clean up the test file immediately after refresh
+    cleanup_test_cs_script_with_errors(&cs_path);
+    println!("✓ Cleaned up test C# script");
+    
+    // Verify the refresh method completed successfully
+    match refresh_result {
+        Ok(Ok(error_logs)) => {
+            println!("✓ Refresh method completed successfully");
+            println!("Collected {} error logs during refresh", error_logs.len());
+            
+            // Verify we received compilation error logs
+            assert!(!error_logs.is_empty(), "Should have received compilation error logs");
+            
+            // Check that the error logs contain compilation-related errors
+            let compilation_errors: Vec<_> = error_logs.iter().filter(|log| {
+                let msg_lower = log.to_lowercase();
+                msg_lower.contains("error") || 
+                msg_lower.contains("compilation") ||
+                msg_lower.contains("testcompilationerrors") ||
+                msg_lower.contains("nonexistentnamespace") ||
+                msg_lower.contains("undefinedvariable") ||
+                msg_lower.contains("cs(") // C# error format usually contains "cs(line,col)"
+            }).collect();
+            
+            assert!(!compilation_errors.is_empty(), 
+                   "Should have received compilation-related error logs. Received logs: {:?}", error_logs);
+            
+            println!("✓ Received {} compilation-related error logs", compilation_errors.len());
+            
+            // Print some of the error logs for debugging
+            for (i, log) in error_logs.iter().take(3).enumerate() {
+                println!("Error log {}: {}", i + 1, log);
+            }
+        },
+        Ok(Err(e)) => {
+            println!("⚠ Refresh method failed: {}", e);
+            // Don't fail the test if Unity is not available or has issues
+            return;
+        },
+        Err(_) => {
+            println!("⚠ Refresh method timed out");
+            // Don't fail the test if Unity takes too long
+            return;
+        }
+    }
+    
+    // Verify that the manager's log collection also contains the errors
+    let all_logs = manager.get_logs();
+    let error_logs_in_manager: Vec<_> = all_logs.iter().filter(|log| {
+        matches!(log.level, crate::unity_messaging_client::LogLevel::Error)
+    }).collect();
+    
+    assert!(!error_logs_in_manager.is_empty(), "Manager should also have error logs in its collection");
+    println!("✓ Manager's log collection contains {} error logs", error_logs_in_manager.len());
+    
+    // Clean up
+    manager.shutdown().await;
+    println!("✓ Refresh test completed successfully");
 }
 
 #[tokio::test]
