@@ -839,10 +839,10 @@ impl UnityManager {
             );
 
             Ok(RefreshResult {
-                refresh_completed: true,
+                refresh_completed: compilation_finished,
                 refresh_error_message: None,
-                compilation_started: true,
-                compilation_completed: true,
+                compilation_started: compilation_started,
+                compilation_completed: compilation_finished,
                 error_logs,
                 duration_seconds: duration,
             })
