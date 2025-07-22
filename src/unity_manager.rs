@@ -176,6 +176,8 @@ impl UnityManager {
                 return Ok(()); // Already connected to this Unity instance
             }
             
+            self.clear_logs();
+
             // Clean up existing connection if any
             self.cleanup_messaging_client().await;
             
@@ -308,6 +310,16 @@ impl UnityManager {
                                     }
                                 } else {
                                     //println!("[DEBUG] Skipping duplicate log: [{:?}] {}", level, message);
+                                }
+                            }
+                            UnityEvent::CompilationStarted => {
+                                // Clear logs when compilation starts to prevent memory growth
+                                debug_log!("Compilation started - clearing logs to prevent memory growth");
+                                if let Ok(mut logs_guard) = logs.lock() {
+                                    logs_guard.clear();
+                                }
+                                if let Ok(mut seen_guard) = seen_logs.lock() {
+                                    seen_guard.clear();
                                 }
                             }
                             UnityEvent::CompilationFinished => {
