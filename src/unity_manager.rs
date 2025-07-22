@@ -134,6 +134,7 @@ pub struct UnityManager {
     event_receiver: Option<broadcast::Receiver<UnityEvent>>,
     is_listening: bool,
     current_unity_pid: Option<u32>,
+    last_compilation_finished: Arc<Mutex<Option<SystemTime>>>,
 }
 
 impl UnityManager {
@@ -150,6 +151,7 @@ impl UnityManager {
             event_receiver: None,
             is_listening: false,
             current_unity_pid: None,
+            last_compilation_finished: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -191,7 +193,7 @@ impl UnityManager {
                     self.current_unity_pid = Some(unity_pid);
                     
                     // Start the log collection task with the event receiver
-                    self.start_log_collection_with_receiver(event_receiver).await;
+                    self.background_event_handling(event_receiver).await;
                     
                     info_log!("Connected to Unity Editor (PID: {})", unity_pid);
                     Ok(())
@@ -253,13 +255,14 @@ impl UnityManager {
         }
     }
     
-    /// Start collecting logs from Unity events with a specific receiver
-    async fn start_log_collection_with_receiver(
+    /// Start background event handling logic
+    async fn background_event_handling(
         &mut self,
         mut event_receiver: broadcast::Receiver<UnityEvent>,
     ) {
         let logs = Arc::clone(&self.logs);
         let seen_logs = Arc::clone(&self.seen_logs);
+        let last_compilation_finished = Arc::clone(&self.last_compilation_finished);
         let max_logs = self.max_logs;
 
         tokio::spawn(async move {
@@ -305,6 +308,13 @@ impl UnityManager {
                                     }
                                 } else {
                                     //println!("[DEBUG] Skipping duplicate log: [{:?}] {}", level, message);
+                                }
+                            }
+                            UnityEvent::CompilationFinished => {
+                                // Update the last compilation finished timestamp
+                                if let Ok(mut timestamp_guard) = last_compilation_finished.lock() {
+                                    *timestamp_guard = Some(SystemTime::now());
+                                    debug_log!("Updated last compilation finished timestamp");
                                 }
                             }
                             _ => {}
@@ -823,11 +833,28 @@ impl UnityManager {
                 debug_log!("No compilation started within 5 seconds");
             }
 
-            // Filter error logs from the existing log collection based on timestamp
+            // Determine the time period for error log collection
+            let mut error_log_time_span = (refresh_start_time, SystemTime::now());
+            if !compilation_started {
+                // If no compilation started, try to include errors from the previous compilation
+                if let Ok(last_compilation_guard) = self.last_compilation_finished.lock() {
+                    if let Some(last_compilation_time) = *last_compilation_guard {
+                        debug_log!("No compilation this refresh, including errors from previous compilation");
+                        // Collect errors from the last compilation plus 2 seconds
+                        error_log_time_span = (last_compilation_time, last_compilation_time + Duration::from_secs(2));
+                    }
+                }
+            };
+
+            // Filter error logs from the existing log collection based on the determined time period
             let error_logs: Vec<String> = self
                 .get_logs()
                 .into_iter()
-                .filter(|log| log.level == LogLevel::Error && log.timestamp >= refresh_start_time)
+                .filter(|log| {
+                    log.level == LogLevel::Error && 
+                    log.timestamp >= error_log_time_span.0 && 
+                    log.timestamp <= error_log_time_span.1
+                })
                 .map(|log| log.message)
                 .collect();
 
