@@ -1,4 +1,4 @@
-use std::collections::{VecDeque, HashSet};
+use std::collections::{VecDeque, HashSet, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tokio::sync::{mpsc, broadcast};
@@ -29,6 +29,31 @@ pub struct RefreshResult {
 struct TestResultAdaptorContainer {
     #[serde(rename = "TestResultAdaptors")]
     test_result_adaptors: Vec<TestResultAdaptor>,
+}
+
+/// Unity test adaptor structures for TestStarted events
+#[derive(Debug, Deserialize, Serialize)]
+struct TestAdaptorContainer {
+    #[serde(rename = "TestAdaptors")]
+    test_adaptors: Vec<TestAdaptor>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TestAdaptor {
+    #[serde(rename = "Id")]
+    pub id: String,
+    #[serde(rename = "Name")]
+    pub name: String,
+    #[serde(rename = "FullName")]
+    pub full_name: String,
+    #[serde(rename = "Type")]
+    pub test_type: u32,
+    #[serde(rename = "Parent")]
+    pub parent: i32,
+    #[serde(rename = "Source")]
+    pub source: String,
+    #[serde(rename = "TestCount")]
+    pub test_count: u32,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -133,6 +158,8 @@ pub struct TestExecutionResult {
     pub execution_completed: bool,
     pub pass_count: u32,
     pub fail_count: u32,
+    /// Mapping from TestId to test full name for validation
+    pub test_id_to_name: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -404,7 +431,7 @@ impl UnityManager {
             // Subscribe to events before sending request
             let mut event_receiver = client.subscribe_to_events();
             
-            // Send the test execution request
+            // Send the test execution request directly - TestStarted events will provide the mapping
             let filter_string = filter.to_filter_string();
             println!("[DEBUG] Sending test filter to Unity: '{}'", filter_string);
             client.execute_tests(&filter_string).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
@@ -415,6 +442,7 @@ impl UnityManager {
                 execution_completed: false,
                 pass_count: 0,
                 fail_count: 0,
+                test_id_to_name: HashMap::new(),
             };
             
             let timeout_duration = Duration::from_secs(300); // 5 minutes for test execution
@@ -424,15 +452,48 @@ impl UnityManager {
             while start_time.elapsed() < timeout_duration {
                 match timeout(Duration::from_secs(10), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
+                        println!("[DEBUG] Received event: {:?}", std::mem::discriminant(&event));
                         match event {
                             UnityEvent::TestRunStarted => {
                                 println!("[DEBUG] Test run started");
                             },
                             UnityEvent::TestStarted(test_info) => {
                                 println!("[DEBUG] Test started: {}", test_info);
+                                
+                                // Parse the TestAdaptorContainer to extract test information
+                                match serde_json::from_str::<TestAdaptorContainer>(&test_info) {
+                                    Ok(container) => {
+                                        println!("[DEBUG] Parsed TestAdaptorContainer with {} adaptors", container.test_adaptors.len());
+                                        for adaptor in &container.test_adaptors {
+                                            println!("[DEBUG] TestStarted adaptor - Id: '{}', Name: '{}', FullName: '{}', Type: {:?}", 
+                                                adaptor.id, adaptor.name, adaptor.full_name, adaptor.test_type);
+                                            result.test_id_to_name.insert(adaptor.id.clone(), adaptor.full_name.clone());
+                                        }
+                                        println!("[DEBUG] Total mappings in test_id_to_name: {}", result.test_id_to_name.len());
+                                    },
+                                    Err(e) => {
+                                        println!("[DEBUG] Failed to deserialize TestAdaptorContainer: {}", e);
+                                        println!("[DEBUG] Raw TestStarted data: {}", test_info);
+                                    }
+                                }
                             },
                             UnityEvent::TestFinished(test_result) => {
                                 println!("[DEBUG] Test finished: {}", test_result);
+                                
+                                // Parse the TestResultAdaptorContainer to extract individual test results
+                                match serde_json::from_str::<TestResultAdaptorContainer>(&test_result) {
+                                    Ok(container) => {
+                                        for adaptor in &container.test_result_adaptors {
+                                            println!("[DEBUG] TestFinished adaptor - TestId: '{}', PassCount: {}, FailCount: {}, ResultState: '{}'", 
+                                                adaptor.test_id, adaptor.pass_count, adaptor.fail_count, adaptor.result_state);
+                                            result.individual_test_results.push(adaptor.clone());
+                                        }
+                                    },
+                                    Err(e) => {
+                                        println!("[DEBUG] Failed to deserialize TestResultAdaptorContainer from TestFinished: {}", e);
+                                        println!("[DEBUG] Raw TestFinished data: {}", test_result);
+                                    }
+                                }
                             },
                             UnityEvent::TestRunFinished(data) => {
                                 println!("[DEBUG] Test run finished");
@@ -441,30 +502,21 @@ impl UnityManager {
                                 if !result.execution_completed {
                                     result.execution_completed = true;
                                     
-                                    // Parse the TestResultAdaptorContainer using proper deserialization
+                                    // Extract pass/fail counts from TestRunFinished event data
                                     match serde_json::from_str::<TestResultAdaptorContainer>(&data) {
                                         Ok(container) => {
-                                            let mut pass_count = 0;
-                                            let mut fail_count = 0;
-                                            
-                                            for adaptor in &container.test_result_adaptors {
-                                                pass_count += adaptor.pass_count;
-                                                fail_count += adaptor.fail_count;
-                                                
-                                                // Only include tests that don't have children
-                                                if !adaptor.has_children {
-                                                    result.individual_test_results.push(adaptor.clone());
-                                                }
+                                            if let Some(adaptor) = container.test_result_adaptors.first() {
+                                                result.pass_count = adaptor.pass_count;
+                                                result.fail_count = adaptor.fail_count;
+                                                println!("[DEBUG] Extracted counts from TestRunFinished: {} passed, {} failed", 
+                                                    adaptor.pass_count, adaptor.fail_count);
+                                            } else {
+                                                println!("[DEBUG] No test result adaptors in TestRunFinished");
                                             }
-                                            
-                                            result.pass_count = pass_count;
-                                            result.fail_count = fail_count;
-                                            println!("[DEBUG] Extracted counts: {} passed, {} failed", pass_count, fail_count);
-                                            println!("[DEBUG] Individual test results: {}", result.individual_test_results.len());
                                         },
                                         Err(e) => {
-                                            println!("[DEBUG] Failed to deserialize TestResultAdaptorContainer: {}", e);
-                                            println!("[DEBUG] Raw data: {}", data);
+                                            println!("[DEBUG] Failed to deserialize TestRunFinished data: {}", e);
+                                            println!("[DEBUG] Raw TestRunFinished data: {}", data);
                                         }
                                     }
                                 }

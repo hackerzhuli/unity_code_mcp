@@ -183,10 +183,35 @@ async fn execute_unity_tests_with_validation(
      println!("✓ Pass/Fail counts match expectations: {} passed, {} failed", 
               test_result.pass_count, test_result.fail_count);
 
-    println!("✓ Test execution validation completed using Unity's built-in counts");
+    // Validate individual test results
+    println!("\n=== Validating individual test results ===");
+    for expected in &expected_individual_results {
+        // Find the test by looking up the TestId that maps to the expected full name
+        let actual_result = test_result.individual_test_results.iter()
+            .find(|result| {
+                if let Some(full_name) = test_result.test_id_to_name.get(&result.test_id) {
+                    full_name == &expected.full_name
+                } else {
+                    false
+                }
+            })
+            .ok_or_else(|| format!("Expected test '{}' not found in results", expected.full_name))?;
+        
+        let test_passed = actual_result.result_state == "Passed";
+        assert_eq!(test_passed, expected.should_pass, 
+                   "Test '{}' expected to {}, but result state was '{}'", 
+                   expected.full_name, 
+                   if expected.should_pass { "pass" } else { "fail" }, 
+                   actual_result.result_state);
+        
+        println!("✓ Test '{}': {} (expected: {})", 
+                 expected.full_name, 
+                 actual_result.result_state, 
+                 if expected.should_pass { "pass" } else { "fail" });
+    }
     
-    // Note: Individual test validation is not needed since Unity provides accurate aggregate counts
-    // The expected_individual_results parameter is kept for potential future use but not validated here
+    println!("✓ All {} individual test results validated successfully", expected_individual_results.len());
+    println!("✓ Test execution validation completed using Unity's built-in counts and individual results");
 
     // Clean up
     manager.shutdown().await;
@@ -219,19 +244,15 @@ async fn test_unity_test_execution_specific_class() {
         },
     ];
 
-    match execute_unity_tests_with_validation(
+    execute_unity_tests_with_validation(
          "TestExecution.Editor.TestExecutionTests",
          5, // expected pass count (all 5 individual tests)
          0, // expected fail count
          expected_individual_results,
          60, // timeout in seconds
-     ).await {
-        Ok(_) => println!("✓ Test execution validation completed successfully"),
-        Err(e) => {
-            println!("⚠ Skipping test: {}", e);
-            // Don't fail the test if Unity is not available
-        }
-    }
+     ).await.expect("Test execution validation should succeed");
+     
+     println!("✓ Test execution validation completed successfully");
 }
 
 #[tokio::test]
@@ -335,17 +356,13 @@ async fn test_unity_test_execution_single_test() {
         },
     ];
 
-    match execute_unity_tests_with_validation(
+    execute_unity_tests_with_validation(
          "TestExecution.Editor.TestExecutionTests.SimplePassingTest",
          1, // expected pass count (just the single test)
          0, // expected fail count
          expected_individual_results,
          30, // timeout in seconds
-     ).await {
-        Ok(_) => println!("✓ Single test execution validation completed successfully"),
-        Err(e) => {
-            println!("⚠ Skipping test: {}", e);
-            // Don't fail the test if Unity is not available
-        }
-    }
+     ).await.expect("Single test execution validation should succeed");
+     
+     println!("✓ Single test execution validation completed successfully");
 }
