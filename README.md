@@ -1,12 +1,14 @@
 # Unity Code MCP Server
 
-> A robust Model Context Protocol (MCP) server that enables AI assistants to seamlessly interact with Unity Editor, surviving domain reloads and compilation cycles.
+> A **coding-focused** Model Context Protocol (MCP) server that enables AI assistants to write Unity code autonomously, surviving domain reloads and compilation cycles.
 
 ## 🎯 Why Unity Code MCP?
 
-**The Problem**: Existing Unity MCP servers fail when Unity is compiling or performing domain reloads, causing AI tool calls to break and interrupting development workflows.
+**The Problem**: Existing Unity MCP servers fail when Unity is compiling or performing domain reloads, causing AI tool calls to break and interrupting development workflows. Additionally, they often include broad Unity operations (scene editing, package management, asset manipulation) that distract from the core task of code development.
 
-**The Solution**: Unity Code MCP is specifically designed to handle Unity's compilation cycles gracefully, ensuring reliable AI-Unity communication even during asset database refreshes and domain reloads.
+**The Solution**: Unity Code MCP is laser-focused on what AI agents do best - **writing code**. It's specifically designed to handle Unity's compilation cycles gracefully while providing only the essential tools needed for autonomous code development: compilation feedback and test execution.
+
+**🎯 Coding-First Philosophy**: Unlike other Unity MCP servers, we deliberately exclude scene editing, package management, and asset manipulation. This focused approach maximizes AI productivity by concentrating on code development workflows where AI agents excel.
 
 ## ✨ Key Features
 
@@ -17,25 +19,38 @@
 
 ## 🛠️ Core Capabilities
 
-Unity Code MCP provides two essential tools that enable AI agents to work autonomously:
+Unity Code MCP provides **exactly two tools** designed for autonomous code development:
 
 ### 1. **Asset Database Refresh**
 - Triggers Unity compilation and asset processing
 - Returns detailed compilation errors and warnings
 - Handles domain reload scenarios gracefully
+- Essential for validating code correctness
 
 ### 2. **Test Execution**
 - Runs Unity tests with comprehensive reporting
 - Provides detailed logs and stack traces for failures
 - Supports both EditMode and PlayMode tests
+- Critical for verifying code functionality
+
+### 🚫 What We Don't Include (By Design)
+
+Unlike other Unity MCP servers, we intentionally **exclude**:
+- Scene editing and manipulation
+- Package management operations
+- Asset creation and modification
+- GameObject hierarchy management
+- Inspector property editing
 
 ### Why Only Two Tools?
 
-This focused approach eliminates token waste by providing only the essential information AI agents need:
-- **Compilation feedback** for code correctness
-- **Test results** for functionality validation
+This laser-focused approach maximizes AI efficiency by:
+- **Eliminating token waste** on non-coding operations
+- **Concentrating on AI strengths** - code generation and debugging
+- **Providing only essential feedback** for the code development loop
+- **Reducing complexity** and potential failure points
 
-This enables AI agents to maintain a productive development loop: *write → compile → fix errors → test → fix bugs → repeat*.
+Result: AI agents maintain a highly productive development loop: *write → compile → fix errors → test → fix bugs → repeat*.
 
 ## 🚀 Quick Start Example
 
