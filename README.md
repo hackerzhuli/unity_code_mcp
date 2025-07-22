@@ -4,16 +4,20 @@
 
 ## 🎯 Why Unity Code MCP?
 
-**The Problem**: Existing Unity MCP servers fail when Unity is compiling or performing domain reloads, causing AI tool calls to break and interrupting development workflows. Additionally, they often include broad Unity operations (scene editing, package management, asset manipulation) that distract from the core task of code development.
+Unity Code MCP is laser-focused on what AI agents do best - **writing code**. It's specifically designed to handle Unity's compilation cycles gracefully while providing only the essential tools needed for autonomous code development: compilation feedback and test execution.
 
-**The Solution**: Unity Code MCP is laser-focused on what AI agents do best - **writing code**. It's specifically designed to handle Unity's compilation cycles gracefully while providing only the essential tools needed for autonomous code development: compilation feedback and test execution.
+Other Unity MCP servers typically fail when Unity is compiling or performing domain reloads, causing AI tool calls to report an error and AI agents confused about what is going on.
 
-**🎯 Coding-First Philosophy**: Unlike other Unity MCP servers, we deliberately exclude scene editing, package management, and asset manipulation. This focused approach maximizes AI productivity by concentrating on code development workflows where AI agents excel.
+Example, with a typical Unity MCP server, when Unity Editor is compiling, and AI make a tool call to run tests. The tool fails because of disconnection.
+
+Not Unity Code MCP! AI agent can make a tool call, whether to refresh asset database or run tests, while Unity is compiling. And the tool call with wait for the compilation to finish and then refresh asset database or run tests. 
+
+**🎯 Coding-First Philosophy**: Unlike other Unity MCP servers, we deliberately exclude scene editing, package management, and asset manipulation. This focused approach allow us to ensure high quality and high performance implementation because there is less code to maintain. This also reduces your token usage because AI has less instructions to read about the tools.
 
 ## ✨ Key Features
 
 - **🔄 Compilation-Resilient**: Survives Unity domain reloads and compilation cycles
-- **🤖 AI-Optimized**: Streamlined tools designed for efficient AI agent workflows
+- **🤖 AI-Optimized**: Streamlined tools designed for efficient AI agent coding workflows
 - **⚡ Performance-Focused**: Minimal token usage with targeted, essential operations
 - **🧪 Test-Driven**: Comprehensive test execution and reporting capabilities
 - **📦 Self-Contained**: Single binary with no runtime dependencies (no Node.js, Python, or .NET required)
@@ -32,26 +36,20 @@ Unity Code MCP provides **exactly two tools** designed for autonomous code devel
 ### 2. **Test Execution**
 - Runs Unity tests with comprehensive reporting
 - Provides stack traces for failures
+- Provides logs for logs captured in a test (this will help AI agents to debug the test by inserting `Debug.Log` statements)
 - Supports both EditMode and PlayMode tests
-
-### 🚫 What We Don't Include (By Design)
-
-Unlike other Unity MCP servers, we intentionally **exclude**:
-- Scene editing and manipulation
-- Package management operations
-- Asset creation and modification
-- GameObject hierarchy management
-- Inspector property editing
 
 ### Why Only Two Tools?
 
 This laser-focused approach maximizes AI efficiency by:
 - **Eliminating token waste** on non-coding operations
-- **Concentrating on AI strengths** - code generation and debugging
+- **Concentrating on AI strengths** - writing code
 - **Providing only essential feedback** for the code development loop
 - **Reducing complexity** and potential failure points
 
 Result: AI agents maintain a highly productive development loop: *write → compile → fix errors → test → fix bugs → repeat*.
+
+AI agents can't read other logs, only current compilation errors from Asset Database Refresh tool call, this means less waste of tool calls and less token usage, give AI only what is useful.
 
 ## 🚀 Quick Start Example
 
