@@ -16,6 +16,8 @@
 - **🤖 AI-Optimized**: Streamlined tools designed for efficient AI agent workflows
 - **⚡ Performance-Focused**: Minimal token usage with targeted, essential operations
 - **🧪 Test-Driven**: Comprehensive test execution and reporting capabilities
+- **📦 Self-Contained**: Single binary with no runtime dependencies (no Node.js, Python, or .NET required)
+- **🚀 High Performance**: Built in Rust for speed and minimal resource usage
 
 ## 🛠️ Core Capabilities
 
