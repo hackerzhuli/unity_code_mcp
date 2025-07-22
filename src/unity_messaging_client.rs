@@ -9,6 +9,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::time::sleep;
+use crate::unity_manager::TestFilter;
 
 /// Unity test result structures for proper deserialization
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -800,13 +801,14 @@ impl UnityMessagingClient {
     /// 
     /// # Arguments
     /// 
-    /// * `filter` - The test filter (e.g., "EditMode", "PlayMode:MyTests.dll", "EditMode:MyNamespace.MyTestClass")
+    /// * `filter` - The test filter specifying which tests to execute
     /// 
     /// # Returns
     /// 
     /// Returns `Ok(())` if the request was sent successfully
-    pub async fn execute_tests(&self, filter: &str) -> Result<(), UnityMessagingError> {
-        let execute_tests_message = Message::new(MessageType::ExecuteTests, filter.to_string());
+    pub async fn execute_tests(&self, filter: TestFilter) -> Result<(), UnityMessagingError> {
+        let filter_string = filter.to_filter_string();
+        let execute_tests_message = Message::new(MessageType::ExecuteTests, filter_string);
         self.send_message(&execute_tests_message, None).await
     }
 

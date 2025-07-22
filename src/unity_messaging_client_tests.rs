@@ -1,6 +1,7 @@
 use crate::unity_project_manager::UnityProjectManager;
 use crate::test_utils::*;
 use crate::unity_messaging_client::*;
+use crate::unity_manager::{TestFilter, TestMode};
 use std::time::Duration;
 
 #[test]
@@ -145,7 +146,11 @@ async fn test_tcp_fallback_integration_with_unity() {
     println!("[TEST] Executing LargeMessageTest to generate large log messages");
     
     // Execute the specific test that generates large messages
-    client.execute_tests("EditMode:TestExecution.Editor.TestWithLargeLog.LargeMessageTest").await
+    let test_filter = TestFilter::Specific {
+        mode: TestMode::EditMode,
+        test_name: "TestExecution.Editor.TestWithLargeLog.LargeMessageTest".to_string(),
+    };
+    client.execute_tests(test_filter).await
         .expect("Failed to send test execution message");
     
     // Wait for test completion and collect results

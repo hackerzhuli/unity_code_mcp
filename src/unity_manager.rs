@@ -411,9 +411,8 @@ impl UnityManager {
             let mut event_receiver = client.subscribe_to_events();
             
             // Send the test execution request directly - TestStarted events will provide the mapping
-            let filter_string = filter.to_filter_string();
-            println!("[DEBUG] Sending test filter to Unity: '{}'", filter_string);
-            client.execute_tests(&filter_string).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+            println!("[DEBUG] Sending test filter to Unity: '{}'", filter.to_filter_string());
+            client.execute_tests(filter).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             
             // Collect test execution events
             let mut result = TestExecutionResult {
