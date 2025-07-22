@@ -1,9 +1,10 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::UdpSocket;
+use tokio::net::{UdpSocket, TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -304,6 +305,29 @@ impl UnityMessagingClient {
         self.event_sender.subscribe()
     }
 
+    /// Receives a large message via TCP fallback
+    /// 
+    /// # Arguments
+    /// 
+    /// * `tcp_port` - The TCP port Unity is listening on
+    /// * `expected_length` - The expected length of the message
+    /// 
+    /// # Returns
+    /// 
+    /// Returns the received message or an error
+    pub(crate) async fn receive_tcp_message(tcp_port: u16, expected_length: usize) -> Result<Message, UnityMessagingError> {
+        // Connect to Unity's TCP server
+        let tcp_address = SocketAddr::from(([127, 0, 0, 1], tcp_port));
+        let mut stream = TcpStream::connect(tcp_address).await?;
+        
+        // Read the message data
+        let mut buffer = vec![0u8; expected_length];
+        stream.read_exact(&mut buffer).await?;
+        
+        // Deserialize the message
+        Message::deserialize(&buffer)
+    }
+
     /// Background task that listens for Unity messages and broadcasts events
     async fn message_listener_task(
         socket: Arc<UdpSocket>,
@@ -388,10 +412,41 @@ impl UnityMessagingClient {
                                     }
                                 }
                                 
-                                // Handle the message and potentially broadcast an event
-                                if let Some(event) = Self::message_to_event(&message) {
-                                    if let Err(_) = event_sender.send(event) {
-                                        // No receivers, continue listening
+                                // Handle TCP fallback for large messages
+                                if message.message_type == MessageType::Tcp {
+                                    // Parse port and length from message value: "<port>:<length>"
+                                    if let Some((port_str, length_str)) = message.value.split_once(':') {
+                                        if let (Ok(tcp_port), Ok(expected_length)) = (port_str.parse::<u16>(), length_str.parse::<usize>()) {
+                                            println!("[DEBUG] Received TCP fallback notification: port={}, length={}", tcp_port, expected_length);
+                                            
+                                            // Connect to Unity's TCP server and receive the large message
+                                            match Self::receive_tcp_message(tcp_port, expected_length).await {
+                                                Ok(large_message) => {
+                                                    println!("[DEBUG] Successfully received large message via TCP: {:?} with {} bytes", large_message.message_type, large_message.value.len());
+                                                    
+                                                    // Process the large message normally
+                                                    if let Some(event) = Self::message_to_event(&large_message) {
+                                                        if let Err(_) = event_sender.send(event) {
+                                                            // No receivers, continue listening
+                                                        }
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    eprintln!("Failed to receive TCP message: {}", e);
+                                                }
+                                            }
+                                        } else {
+                                            eprintln!("Invalid TCP message format: {}", message.value);
+                                        }
+                                    } else {
+                                        eprintln!("Invalid TCP message format: {}", message.value);
+                                    }
+                                } else {
+                                    // Handle the message and potentially broadcast an event
+                                    if let Some(event) = Self::message_to_event(&message) {
+                                        if let Err(_) = event_sender.send(event) {
+                                            // No receivers, continue listening
+                                        }
                                     }
                                 }
                                 
@@ -462,7 +517,7 @@ impl UnityMessagingClient {
             MessageType::Refresh => Some(UnityEvent::RefreshCompleted(message.value.clone())),
             
             // Internal messages (don't broadcast)
-            MessageType::Ping | MessageType::Pong => None,
+            MessageType::Ping | MessageType::Pong | MessageType::Tcp => None,
             
             // Other messages (don't broadcast for now)
             _ => None,
