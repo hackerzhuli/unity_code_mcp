@@ -27,7 +27,7 @@ pub struct RunTestsRequest {
     #[schemars(description = "Test mode to run: EditMode or PlayMode")]
     pub test_mode: String,
     #[schemars(
-        description = "Optional filter: namespace (Namespace), class name (Namespace.Class), or specific method name (Namespace.Class.Method)"
+        description = "Optional filter: namespace (Namespace), class name (Namespace.Class), or specific method name (Namespace.Class.Method), all names must be fully qualified."
     )]
     pub filter: Option<String>,
 }
@@ -170,6 +170,9 @@ impl UnityCodeMcpServer {
                     "execution_completed": result.execution_completed,
                     "pass_count": result.pass_count,
                     "fail_count": result.fail_count,
+                    "skip_count": result.skip_count,
+                    "test_count": result.test_count,
+                    "duration_seconds": result.duration_seconds,
                     "test_results": result.test_results.iter().map(|test| {
                         json!({
                             "full_name": test.full_name,
