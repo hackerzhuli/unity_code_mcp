@@ -94,15 +94,15 @@ pub struct SimpleTestResult {
     /// The full name of the test including namespace and class
     pub full_name: String,
     /// Stack trace information if the test failed, empty if passed
-    pub stack_trace: String,
+    pub error_stack_trace: String,
     /// Whether the test passed (true) or failed (false)
     pub passed: bool,
     /// Duration of the test execution in seconds
-    pub duration: f64,
+    pub duration_seconds: f64,
     /// Error or failure message, empty if the test passed
-    pub message: String,
+    pub error_message: String,
     /// Test output logs captured during execution
-    pub output: String,
+    pub output_logs: String,
 }
 
 /// Test execution result
@@ -611,6 +611,11 @@ impl UnityManager {
                                         adaptor.fail_count,
                                         adaptor.result_state
                                     );
+                                    
+                                    // only add tests that don't have children
+                                    if adaptor.has_children {
+                                        continue;
+                                    }
 
                                     // Create SimpleTestResult from TestResultAdaptor
                                     let full_name = test_id_to_name
@@ -622,11 +627,11 @@ impl UnityManager {
 
                                     let simple_result = SimpleTestResult {
                                         full_name,
-                                        stack_trace: adaptor.stack_trace.clone(),
+                                        error_stack_trace: adaptor.stack_trace.clone(),
                                         passed: adaptor.result_state == "Passed",
-                                        duration: adaptor.duration,
-                                        message: adaptor.message.clone(),
-                                        output: adaptor.output.clone(),
+                                        duration_seconds: adaptor.duration,
+                                        error_message: adaptor.message.clone(),
+                                        output_logs: adaptor.output.clone(),
                                     };
 
                                     result.test_results.push(simple_result);

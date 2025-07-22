@@ -174,10 +174,10 @@ impl UnityCodeMcpServer {
                         json!({
                             "full_name": test.full_name,
                             "passed": test.passed,
-                            "duration": test.duration,
-                            "message": test.message,
-                            "stack_trace": test.stack_trace,
-                            "output": test.output
+                            "duration_seconds": test.duration_seconds,
+                            "error_message": test.error_message,
+                            "stack_trace": test.error_stack_trace,
+                            "output_logs": test.output_logs
                         })
                     }).collect::<Vec<_>>()
                 });
