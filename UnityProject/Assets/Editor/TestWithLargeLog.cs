@@ -1,3 +1,7 @@
+using NUnit.Framework;
+using UnityEngine;
+using UnityEditor;
+
 namespace TestExecution.Editor
 {
     public class TestWithLargeLog 
