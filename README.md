@@ -10,7 +10,7 @@ Other Unity MCP servers typically fail when Unity is compiling or performing dom
 
 Example, with a typical Unity MCP server, when Unity Editor is compiling, and AI make a tool call to run tests. The tool fails because of disconnection.
 
-Not Unity Code MCP! AI agent can make a tool call, whether to refresh asset database or run tests, while Unity is compiling. And the tool call with wait for the compilation to finish and then refresh asset database or run tests. 
+Not Unity Code MCP! AI agent can make a tool call, whether to refresh asset database or run tests, while Unity is compiling. And the tool call will wait for the compilation to finish and then proceed to refresh asset database or run tests. Yes, AI can tell Unity to compile while Unity is compiling! In fact AI can modify code while Unity is compiling and then tell Unity to compile while Unity is still compiling and the tool call will still succeed because it will wait for the compilation to finish and trigger a new compilation(only if needed).
 
 **🎯 Coding-First Philosophy**: Unlike other Unity MCP servers, we deliberately exclude scene editing, package management, and asset manipulation. This focused approach allow us to ensure high quality and high performance implementation because there is less code to maintain. This also reduces your token usage because AI has less instructions to read about the tools.
 
@@ -29,7 +29,7 @@ Unity Code MCP provides **exactly two tools** designed for autonomous code devel
 
 ### 1. **Asset Database Refresh**
 - Triggers Unity compilation and asset processing
-- Returns only compilation errors and nothing else
+- Returns only compilation errors and other errors during the refresh, no warnings or info logs.
 - Handles domain reload scenarios gracefully
 - Essential for validating code correctness
 
