@@ -294,9 +294,9 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
     let cs_path = create_test_cs_script_with_errors(&project_path);
     println!("✓ Created C# script with compilation errors");
     
-    // Wait a bit for Unity to detect the file change
-    tokio::time::sleep(Duration::from_millis(2000)).await;
-    println!("✓ Waited for Unity to detect file changes");
+    // Clear logs right before refresh to ensure we only collect logs from the refresh process
+    manager.clear_logs();
+    println!("✓ Cleared logs before refresh");
     
     // Call the refresh method which should trigger compilation and collect error logs
     let refresh_result = timeout(Duration::from_secs(60), manager.refresh()).await;
@@ -307,15 +307,22 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
     
     // Verify the refresh method completed successfully
     match refresh_result {
-        Ok(Ok(error_logs)) => {
+        Ok(Ok(result)) => {
             println!("✓ Refresh method completed successfully");
-            println!("Collected {} error logs during refresh", error_logs.len());
+            println!("Refresh completed: {}", result.refresh_completed);
+            println!("Compilation occurred: {}", result.compilation_occurred);
+            println!("Duration: {:.2} seconds", result.duration_seconds);
+            println!("Collected {} error logs during refresh", result.error_logs.len());
+            
+            // Verify refresh completed successfully
+            assert!(result.refresh_completed, "Refresh should have completed successfully");
+            assert!(result.refresh_error_message.is_none(), "Refresh should not have error message: {:?}", result.refresh_error_message);
             
             // Verify we received compilation error logs
-            assert!(!error_logs.is_empty(), "Should have received compilation error logs");
+            assert!(!result.error_logs.is_empty(), "Should have received compilation error logs");
             
             // Check that the error logs contain compilation-related errors
-            let compilation_errors: Vec<_> = error_logs.iter().filter(|log| {
+            let compilation_errors: Vec<_> = result.error_logs.iter().filter(|log| {
                 let msg_lower = log.to_lowercase();
                 msg_lower.contains("error") || 
                 msg_lower.contains("compilation") ||
@@ -326,12 +333,12 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
             }).collect();
             
             assert!(!compilation_errors.is_empty(), 
-                   "Should have received compilation-related error logs. Received logs: {:?}", error_logs);
+                   "Should have received compilation-related error logs. Received logs: {:?}", result.error_logs);
             
             println!("✓ Received {} compilation-related error logs", compilation_errors.len());
             
             // Print some of the error logs for debugging
-            for (i, log) in error_logs.iter().take(3).enumerate() {
+            for (i, log) in result.error_logs.iter().take(3).enumerate() {
                 println!("Error log {}: {}", i + 1, log);
             }
         },

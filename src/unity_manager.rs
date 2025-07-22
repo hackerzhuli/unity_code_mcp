@@ -9,6 +9,21 @@ use serde_json;
 use crate::unity_messaging_client::{UnityMessagingClient, UnityEvent, UnityMessagingError, LogLevel};
 use crate::unity_project_manager::UnityProjectManager;
 
+/// Result of a refresh operation
+#[derive(Debug, Clone)]
+pub struct RefreshResult {
+    /// Whether the refresh was completed successfully
+    pub refresh_completed: bool,
+    /// Error message from refresh response (if any)
+    pub refresh_error_message: Option<String>,
+    /// Whether compilation occurred during the refresh
+    pub compilation_occurred: bool,
+    /// Error logs collected during the refresh process
+    pub error_logs: Vec<String>,
+    /// Total duration of the refresh operation in seconds
+    pub duration_seconds: f64,
+}
+
 /// Unity test result structures for proper deserialization
 #[derive(Debug, Deserialize, Serialize)]
 struct TestResultAdaptorContainer {
@@ -372,55 +387,10 @@ impl UnityManager {
         }
     }
 
-    /// Send refresh message to Unity
+    /// Send refresh message to Unity (this is the simple variant that just sends the message)
     pub async fn refresh_unity(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &mut self.messaging_client {
-            client.send_refresh_message().await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-        } else {
-            Err("Messaging client not initialized".into())
-        }
-    }
-
-    /// Retrieve the list of available tests for the specified test mode
-    /// 
-    /// # Arguments
-    /// 
-    /// * `test_mode` - The test mode to retrieve tests for
-    /// 
-    /// # Returns
-    /// 
-    /// Returns the test list as a JSON string containing the complete test hierarchy
-    pub async fn retrieve_test_list(&mut self, test_mode: TestMode) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(client) = &mut self.messaging_client {
-            // Subscribe to events before sending request
-            let mut event_receiver = client.subscribe_to_events();
-            
-            // Send the test list request
-            client.retrieve_test_list(test_mode.as_str()).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            
-            // Wait for the TestListRetrieved event response
-            let timeout_duration = Duration::from_secs(30);
-            
-            match timeout(timeout_duration, async {
-                loop {
-                    match event_receiver.recv().await {
-                        Ok(UnityEvent::TestListRetrieved(test_list)) => {
-                            // The test list format is "TestMode:JsonData"
-                            // We need to extract just the JSON part
-                            if let Some(colon_pos) = test_list.find(':') {
-                                return Ok(test_list[colon_pos + 1..].to_string());
-                            } else {
-                                return Ok(test_list);
-                            }
-                        },
-                        Ok(_) => continue,
-                        Err(_) => return Err("Event channel closed".into()),
-                    }
-                }
-            }).await {
-                Ok(result) => result,
-                Err(_) => Err("Timeout waiting for Unity test list response".into()),
-            }
+            client.send_refresh_message(Some(60)).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         } else {
             Err("Messaging client not initialized".into())
         }
@@ -435,7 +405,7 @@ impl UnityManager {
     /// # Returns
     /// 
     /// Returns a TestExecutionResult containing information about the test execution
-    pub async fn execute_tests(&mut self, filter: TestFilter) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn run_tests(&mut self, filter: TestFilter) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &mut self.messaging_client {
             // Subscribe to events before sending request
             let mut event_receiver = client.subscribe_to_events();
@@ -546,7 +516,7 @@ impl UnityManager {
     /// 
     /// Returns a TestExecutionResult containing information about the test execution
     pub async fn execute_all_tests(&mut self, test_mode: TestMode) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
-        self.execute_tests(TestFilter::All(test_mode)).await
+        self.run_tests(TestFilter::All(test_mode)).await
     }
 
     /// Execute tests in a specific assembly
@@ -560,7 +530,7 @@ impl UnityManager {
     /// 
     /// Returns a TestExecutionResult containing information about the test execution
     pub async fn execute_assembly_tests(&mut self, test_mode: TestMode, assembly_name: String) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
-        self.execute_tests(TestFilter::Assembly { mode: test_mode, assembly_name }).await
+        self.run_tests(TestFilter::Assembly { mode: test_mode, assembly_name }).await
     }
 
     /// Execute a specific test by its full name
@@ -574,7 +544,7 @@ impl UnityManager {
     /// 
     /// Returns a TestExecutionResult containing information about the test execution
     pub async fn execute_specific_test(&mut self, test_mode: TestMode, test_name: String) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
-        self.execute_tests(TestFilter::Specific { mode: test_mode, test_name }).await
+        self.run_tests(TestFilter::Specific { mode: test_mode, test_name }).await
     }
 
     /// Send refresh message and collect error logs during compilation
@@ -585,21 +555,24 @@ impl UnityManager {
     /// 
     /// # Returns
     /// 
-    /// Returns a vector of error log messages received during the refresh process
-    pub async fn refresh(&mut self) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+    /// Returns a RefreshResult containing comprehensive information about the refresh operation
+    pub async fn refresh(&mut self) -> Result<RefreshResult, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &mut self.messaging_client {
             // Subscribe to events before sending request
             let mut event_receiver = client.subscribe_to_events();
             
-            // Record the start time to filter logs by timestamp
+            let operation_start = std::time::Instant::now();
+            
+            // Send the refresh message, allow 60 seconds to send
+            client.send_refresh_message(Some(60)).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+            //println!("[DEBUG] Refresh message sent");
+            
+            // refresh start should be when we actually send the message
             let refresh_start_time = SystemTime::now();
-            
-            // Send the refresh message
-            client.send_refresh_message().await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            println!("[DEBUG] Refresh message sent");
-            
+
             // Track refresh process state
             let mut refresh_response_received = false;
+            let mut refresh_error_message: Option<String> = None;
             let mut compilation_started = false;
             let mut compilation_finished = false;
             
@@ -611,9 +584,25 @@ impl UnityManager {
                 match timeout(Duration::from_secs(10), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
                         match event {
-                            UnityEvent::RefreshCompleted => {
-                                println!("[DEBUG] Refresh completed");
+                            UnityEvent::RefreshCompleted(message) => {
+                                println!("[DEBUG] Refresh completed with message: '{}'", message);
                                 refresh_response_received = true;
+                                
+                                // Check if refresh failed (non-empty message indicates error)
+                                if !message.is_empty() {
+                                    refresh_error_message = Some(message.clone());
+                                    println!("[DEBUG] Refresh failed: {}", message);
+                                    
+                                    // Return early with error result
+                                    let duration = operation_start.elapsed().as_secs_f64();
+                                    return Ok(RefreshResult {
+                                        refresh_completed: false,
+                                        refresh_error_message: Some(message),
+                                        compilation_occurred: false,
+                                        error_logs: Vec::new(),
+                                        duration_seconds: duration,
+                                    });
+                                }
                             },
                             _ => {
                                 // Ignore other events while waiting for refresh response
@@ -630,12 +619,19 @@ impl UnityManager {
             }
             
             if !refresh_response_received {
-                return Err("Timeout waiting for refresh response".into());
+                let duration = operation_start.elapsed().as_secs_f64();
+                return Ok(RefreshResult {
+                    refresh_completed: false,
+                    refresh_error_message: Some("Timeout waiting for refresh response".to_string()),
+                    compilation_occurred: false,
+                    error_logs: Vec::new(),
+                    duration_seconds: duration,
+                });
             }
             
-            // Wait for compilation started event for 5 seconds
+            // Wait for compilation started event for 3 seconds
             let compilation_wait_start = std::time::Instant::now();
-            while compilation_wait_start.elapsed() < Duration::from_secs(5) && !compilation_started {
+            while compilation_wait_start.elapsed() < Duration::from_secs(3) && !compilation_started {
                 match timeout(Duration::from_millis(100), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
                         match event {
@@ -657,10 +653,10 @@ impl UnityManager {
                 }
             }
             
-            // If compilation started, wait for compilation finished
+            // If compilation started, wait for compilation finished for 60 seconds
             if compilation_started {
                 while start_time.elapsed() < timeout_duration && !compilation_finished {
-                    match timeout(Duration::from_secs(10), event_receiver.recv()).await {
+                    match timeout(Duration::from_secs(60), event_receiver.recv()).await {
                         Ok(Ok(event)) => {
                             match event {
                                 UnityEvent::CompilationFinished => {
@@ -682,8 +678,19 @@ impl UnityManager {
                 }
                 
                 if !compilation_finished {
-                    return Err("Timeout waiting for compilation to finish".into());
+                    let duration = operation_start.elapsed().as_secs_f64();
+                    return Ok(RefreshResult {
+                        refresh_completed: false,
+                        refresh_error_message: Some("Timeout waiting for compilation to finish after 60 seconds".to_string()),
+                        compilation_occurred: true,
+                        error_logs: Vec::new(),
+                        duration_seconds: duration,
+                    });
                 }
+                
+                // Wait additional time for error logs to arrive after compilation finishes
+                println!("[DEBUG] Waiting 2 seconds for error logs after compilation finished");
+                tokio::time::sleep(Duration::from_secs(2)).await;
             } else {
                 println!("[DEBUG] No compilation started within 5 seconds");
             }
@@ -697,8 +704,16 @@ impl UnityManager {
                 .map(|log| log.message)
                 .collect();
             
-            println!("[DEBUG] Refresh completed, collected {} error logs", error_logs.len());
-            Ok(error_logs)
+            let duration = operation_start.elapsed().as_secs_f64();
+            println!("[DEBUG] Refresh completed, collected {} error logs in {:.2} seconds", error_logs.len(), duration);
+            
+            Ok(RefreshResult {
+                refresh_completed: true,
+                refresh_error_message: None,
+                compilation_occurred: compilation_started,
+                error_logs,
+                duration_seconds: duration,
+            })
         } else {
             Err("Messaging client not initialized".into())
         }

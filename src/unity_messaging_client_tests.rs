@@ -156,7 +156,8 @@ async fn test_unity_log_generation_and_listening() {
     println!("Created test USS file: {}", uss_path.display());
 
     // Send refresh message to Unity
-    if let Err(e) = client.send_refresh_message().await {
+    if let Err(e) = client.send_refresh_message(None).await {
+
         println!("Failed to send refresh message: {}", e);
         cleanup_test_uss_file(&uss_path);
         return;
@@ -287,7 +288,7 @@ async fn test_unity_online_offline_state() {
 
     // Send refresh message to Unity to trigger compilation
     println!("[TEST] About to send refresh message (timestamp: {:?})", std::time::Instant::now());
-    client.send_refresh_message().await
+    client.send_refresh_message(None).await
         .expect("Failed to send refresh message");
     println!("[TEST] Sent refresh message to trigger compilation (timestamp: {:?})", std::time::Instant::now());
 
@@ -335,7 +336,8 @@ async fn test_unity_online_offline_state() {
 
     // Send another refresh message to Unity to trigger second compilation after cleanup
     // This ensures Unity processes the file deletion and reaches a clean state
-    if let Err(e) = client.send_refresh_message().await {
+    if let Err(e) = client.send_refresh_message(None).await {
+
         println!("Warning: Failed to send second refresh message after cleanup: {}", e);
     } else {
         println!("[TEST] Sent second refresh message for cleanup compilation");
@@ -453,7 +455,8 @@ async fn test_send_message_with_stable_delivery() {
     let cs_script_path = create_test_cs_script(&project_path);
 
     // Send refresh message to Unity to trigger compilation
-    client.send_refresh_message().await
+    client.send_refresh_message(None).await
+
         .expect("Failed to send refresh message");
 
     // Wait for Unity to go offline during compilation
@@ -504,7 +507,8 @@ async fn test_send_message_with_stable_delivery() {
     cleanup_test_cs_script(&cs_script_path);
 
     // Send another refresh message to clean up
-    if let Err(e) = client.send_refresh_message().await {
+    if let Err(e) = client.send_refresh_message(None).await {
+
         println!("Warning: Failed to send cleanup refresh message: {}", e);
     } else {
         tokio::time::sleep(Duration::from_secs(5)).await;

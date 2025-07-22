@@ -182,8 +182,8 @@ pub enum UnityEvent {
     CompilationFinished,
     /// Compilation started
     CompilationStarted,
-    /// Refresh completed
-    RefreshCompleted,
+    /// Refresh completed with optional error message
+    RefreshCompleted(String),
     /// Unity went online
     Online,
     /// Unity went offline
@@ -459,7 +459,7 @@ impl UnityMessagingClient {
             MessageType::CompilationStarted => Some(UnityEvent::CompilationStarted),
             
             // Refresh messages
-            MessageType::Refresh => Some(UnityEvent::RefreshCompleted),
+            MessageType::Refresh => Some(UnityEvent::RefreshCompleted(message.value.clone())),
             
             // Internal messages (don't broadcast)
             MessageType::Ping | MessageType::Pong => None,
@@ -605,10 +605,10 @@ impl UnityMessagingClient {
     /// # Returns
     /// 
     /// Returns `Ok(())` if the message was sent successfully
-    pub async fn send_refresh_message(&self) -> Result<(), UnityMessagingError> {
+    pub async fn send_refresh_message(&self, timeout_seconds: Option<u64>) -> Result<(), UnityMessagingError> {
         let refresh_message = Message::new(MessageType::Refresh, String::new());
-        println!("[DEBUG] Sending refresh message to Unity at {}", self.unity_address);
-        self.send_message_internal(&refresh_message).await
+        //println!("[DEBUG] Sending refresh message to Unity at {}", self.unity_address);
+        self.send_message(&refresh_message, timeout_seconds).await
     }
 
     /// Requests the list of available tests for the specified test mode
