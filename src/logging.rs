@@ -53,7 +53,7 @@ fn init_file_logging() {
     let target = Box::new(
         fs::OpenOptions::new()
             .create(true)
-            .append(true)
+            .append(false)
             .open(&log_file)
             .expect("Failed to open log file"),
     );
