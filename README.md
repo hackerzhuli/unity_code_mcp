@@ -16,6 +16,24 @@ We don't give AI a way to randomly look at logs because that is just a waste of 
 
 These two tools allow AI agent to be in a loop of writing code, compile the code, fix compile errors, run tests against them, fix bugs according to failed tests, until the relavant tests pass. Which enables max productivity from using AI agents. 
 
+## Installtion
+1. Install the Unity package [Visual Studio Code Editor](https://github.com/hackerzhuli/com.hackerzhuli.code)
+2. Build or download the binary of this project. 
+3. Add this manually to your code editor.
+
+``` json
+{
+  "mcpServers": {
+    "server-name": {
+      "command": "/path/to/unity-code-mcp-server",
+      "env": {
+        "UNITY_PROJECT_PATH": "path/to/unity/project"
+      }
+    }
+  }
+}
+```
+
 ## Test
 When running tests, you need to have a running Unity Editor instance, opening the embedded Unity project in `UnityProject`.
 
