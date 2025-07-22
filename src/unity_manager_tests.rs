@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use tokio::time::{sleep, timeout};
 
 use crate::test_utils::{cleanup_test_uss_file, create_test_uss_file, get_unity_project_path, create_test_cs_script, cleanup_test_cs_script, create_test_cs_script_with_errors, cleanup_test_cs_script_with_errors};
-use crate::unity_manager::{UnityManager, TestMode};
+use crate::unity_manager::{TestFilter, TestMode, UnityManager};
 
 /// Expected test result for individual test validation
 #[derive(Debug, Clone)]
@@ -101,7 +101,7 @@ async fn test_unity_manager_log_collection() {
     assert!(manager.is_unity_online(), "Unity should be online");
     
     // Test version request
-    if let Ok(version) = manager.get_unity_version().await {
+    if let Ok(version) = manager.get_unity_package_version().await {
         assert!(!version.is_empty(), "Unity version should not be empty");
         println!("Unity version: {}", version);
     }
@@ -150,7 +150,10 @@ async fn execute_unity_tests_with_validation(
     println!("\n=== Executing tests with filter: {} ===", test_filter);
     let test_result = timeout(
         Duration::from_secs(timeout_seconds),
-        manager.execute_specific_test(TestMode::EditMode, test_filter.to_string())
+        manager.run_tests(TestFilter::Specific {
+            mode: TestMode::EditMode,
+            test_name: test_filter.to_string(),
+        })
     ).await
         .map_err(|_| "Timeout executing tests")?
         .map_err(|e| format!("Failed to execute tests: {}", e))?;

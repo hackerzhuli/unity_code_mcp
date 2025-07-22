@@ -302,24 +302,8 @@ impl UnityManager {
             .unwrap_or(false)
     }
 
-    /// Send a ping to Unity
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the ping was sent successfully
-    pub async fn send_ping(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(client) = &self.messaging_client {
-            client
-                .send_ping()
-                .await
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-        } else {
-            Err("Messaging client not initialized".into())
-        }
-    }
-
     /// Get Unity package version (not Unity Editor version)
-    pub async fn get_unity_version(
+    pub async fn get_unity_package_version(
         &mut self,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &mut self.messaging_client {
@@ -604,66 +588,6 @@ impl UnityManager {
         } else {
             Err("Messaging client not initialized".into())
         }
-    }
-
-    /// Execute all tests in the specified mode
-    ///
-    /// # Arguments
-    ///
-    /// * `test_mode` - The test mode to execute all tests for
-    ///
-    /// # Returns
-    ///
-    /// Returns a TestExecutionResult containing information about the test execution
-    pub async fn execute_all_tests(
-        &mut self,
-        test_mode: TestMode,
-    ) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
-        self.run_tests(TestFilter::All(test_mode)).await
-    }
-
-    /// Execute tests in a specific assembly
-    ///
-    /// # Arguments
-    ///
-    /// * `test_mode` - The test mode
-    /// * `assembly_name` - The name of the assembly (e.g., "MyTests.dll")
-    ///
-    /// # Returns
-    ///
-    /// Returns a TestExecutionResult containing information about the test execution
-    pub async fn execute_assembly_tests(
-        &mut self,
-        test_mode: TestMode,
-        assembly_name: String,
-    ) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
-        self.run_tests(TestFilter::Assembly {
-            mode: test_mode,
-            assembly_name,
-        })
-        .await
-    }
-
-    /// Execute a specific test by its full name
-    ///
-    /// # Arguments
-    ///
-    /// * `test_mode` - The test mode
-    /// * `test_name` - The full name of the test (e.g., "MyNamespace.MyTestClass.MyTestMethod")
-    ///
-    /// # Returns
-    ///
-    /// Returns a TestExecutionResult containing information about the test execution
-    pub async fn execute_specific_test(
-        &mut self,
-        test_mode: TestMode,
-        test_name: String,
-    ) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
-        self.run_tests(TestFilter::Specific {
-            mode: test_mode,
-            test_name,
-        })
-        .await
     }
 
     /// Send refresh message and collect error logs during compilation
