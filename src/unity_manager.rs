@@ -3,7 +3,7 @@ use serde_json;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 use tokio::time::timeout;
 
 use crate::unity_messaging_client::{
@@ -133,6 +133,7 @@ pub struct UnityManager {
     max_logs: usize,
     event_receiver: Option<broadcast::Receiver<UnityEvent>>,
     is_listening: bool,
+    current_unity_pid: Option<u32>,
 }
 
 impl UnityManager {
@@ -148,6 +149,7 @@ impl UnityManager {
             max_logs: 1000, // Keep last 1000 log entries
             event_receiver: None,
             is_listening: false,
+            current_unity_pid: None,
         })
     }
 
@@ -155,31 +157,102 @@ impl UnityManager {
     pub async fn initialize_messaging(
         &mut self,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Try to connect to Unity if it's running
+        self.try_connect_to_unity().await?;
+        
+        Ok(())
+    }
+
+    /// Try to connect to Unity if it's running
+    async fn try_connect_to_unity(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Update process info to check if Unity is running
         self.project_manager.update_process_info().await?;
-
+        
         if let Some(unity_pid) = self.project_manager.unity_process_id() {
-            let mut client = UnityMessagingClient::new(unity_pid).await?;
-
-            // Subscribe to events before starting listener
-            let event_receiver = client.subscribe_to_events();
-
-            // Start listening for Unity events
-            client.start_listening().await?;
-            self.is_listening = true;
-
-            self.messaging_client = Some(client);
-
-            // Start the log collection task with the event receiver
-            self.start_log_collection_with_receiver(event_receiver)
-                .await;
-
-            Ok(())
+            // Check if we're already connected to this PID
+            if self.current_unity_pid == Some(unity_pid) && self.messaging_client.is_some() {
+                return Ok(()); // Already connected to this Unity instance
+            }
+            
+            // Clean up existing connection if any
+            self.cleanup_messaging_client().await;
+            
+            // Create new connection
+            match UnityMessagingClient::new(unity_pid).await {
+                Ok(mut client) => {
+                    // Subscribe to events before starting listener
+                    let event_receiver = client.subscribe_to_events();
+                    
+                    // Start listening for Unity events
+                    client.start_listening().await?;
+                    self.is_listening = true;
+                    
+                    self.messaging_client = Some(client);
+                    self.current_unity_pid = Some(unity_pid);
+                    
+                    // Start the log collection task with the event receiver
+                    self.start_log_collection_with_receiver(event_receiver).await;
+                    
+                    info_log!("Connected to Unity Editor (PID: {})", unity_pid);
+                    Ok(())
+                }
+                Err(e) => {
+                    warn_log!("Failed to connect to Unity Editor (PID: {}): {}", unity_pid, e);
+                    Err(e.into())
+                }
+            }
         } else {
+            // No Unity process found, clean up if we had a connection
+            if self.messaging_client.is_some() {
+                info_log!("Unity Editor is no longer running, cleaning up connection");
+                self.cleanup_messaging_client().await;
+            }
             Err("Unity Editor is not running".into())
         }
     }
-
+    
+    /// Clean up the messaging client and related resources
+    async fn cleanup_messaging_client(&mut self) {
+        if let Some(client) = self.messaging_client.take() {
+            // Stop listening
+            self.is_listening = false;
+            
+            // The client will be dropped here, which should clean up resources
+            drop(client);
+        }
+        
+        self.current_unity_pid = None;
+        self.event_receiver = None;
+        
+        debug_log!("Messaging client cleaned up");
+    }
+    
+    /// Check and update Unity connection status
+    /// This is important because Unity Editor could shutdown or start after this is initialized
+    pub async fn update_unity_connection(&mut self) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        // Update process info
+        self.project_manager.update_process_info().await?;
+        let current_pid = self.project_manager.unity_process_id();
+        
+        // Check if Unity process changed
+        if current_pid != self.current_unity_pid {
+            if current_pid.is_some() {
+                // Unity started or changed, try to connect
+                match self.try_connect_to_unity().await {
+                    Ok(_) => Ok(true),
+                    Err(_) => Ok(false),
+                }
+            } else {
+                // Unity stopped, clean up
+                self.cleanup_messaging_client().await;
+                Ok(false)
+            }
+        } else {
+            // No process change, return current connection status
+            Ok(self.messaging_client.is_some())
+        }
+    }
+    
     /// Start collecting logs from Unity events with a specific receiver
     async fn start_log_collection_with_receiver(
         &mut self,
@@ -780,12 +853,8 @@ impl UnityManager {
 
     /// Stop the messaging client and cleanup
     pub async fn shutdown(&mut self) {
-        if let Some(client) = &mut self.messaging_client {
-            client.stop_listening();
-        }
-        self.is_listening = false;
-        self.messaging_client = None;
-        self.event_receiver = None;
+        // Clean up messaging client
+        self.cleanup_messaging_client().await;
 
         // Clear all logs and seen logs to prevent state leakage between test runs
         self.clear_logs();
@@ -797,6 +866,13 @@ impl UnityManager {
 
 impl Drop for UnityManager {
     fn drop(&mut self) {
-        self.shutdown();
+        // Clean up messaging client synchronously
+        if let Some(client) = self.messaging_client.take() {
+            drop(client);
+        }
+        
+        self.current_unity_pid = None;
+        self.event_receiver = None;
+        self.is_listening = false;
     }
 }

@@ -73,6 +73,12 @@ impl UnityCodeMcpServer {
                 }
             }
         }
+        
+        // Update Unity connection to ensure we're connected to the current Unity instance
+        if let Some(manager) = manager_guard.as_mut() {
+            let _ = manager.update_unity_connection().await;
+        }
+        
         Ok(())
     }
 
