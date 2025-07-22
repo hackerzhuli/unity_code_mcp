@@ -54,6 +54,7 @@ This project aims to create a reliable Model Context Protocol (MCP) server that 
 - A real (but minimal) Unity project is embedded in `UnityProject` for running related tests (that doesn't require a running Unity Editor instance, just need files, including Unity generated files)
 - Manual tests with Unity Editor scenarios
 - Don't create examples binaries(for testing or any other reason), only do unit tests for testing
+- Run test sequentially with `cargo test -- --test-threads=1`, otherwise, Unity Editor related tests can fail.
 
 ### Compatibility
 - Target stable Rust versions

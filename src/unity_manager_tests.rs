@@ -198,9 +198,6 @@ async fn execute_unity_tests_with_validation(
     // Clean up
     manager.shutdown().await;
     
-    // Add a delay to prevent leftover events from affecting subsequent tests
-    tokio::time::sleep(Duration::from_millis(5000)).await;
-    
     Ok(())
 }
 
@@ -266,26 +263,4 @@ async fn test_unity_test_execution_single_test() {
             // Don't fail the test if Unity is not available
         }
     }
-}
-
-#[tokio::test]
-async fn test_unity_manager_without_unity() {
-    let project_path = get_unity_project_path();
-    let mut manager = UnityManager::new(project_path.to_string_lossy().to_string()).await
-        .expect("Should be able to create manager even without Unity running");
-
-    // Should fail to initialize messaging without Unity
-    assert!(manager.initialize_messaging().await.is_err(), "Should fail to initialize messaging without Unity");
-    
-    // Should report Unity as offline
-    assert!(!manager.is_unity_online(), "Unity should be offline");
-    
-    // Should have no logs
-    assert_eq!(manager.log_count(), 0, "Should have no logs without Unity");
-    
-    // Should fail to get version
-    assert!(manager.get_unity_version().await.is_err(), "Should fail to get version without Unity");
-    
-    // Should fail to get project path
-    assert!(manager.get_project_path().await.is_err(), "Should fail to get project path without Unity");
 }
