@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -8,6 +9,74 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::time::sleep;
+
+/// Unity test result structures for proper deserialization
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TestResultAdaptorContainer {
+    #[serde(rename = "TestResultAdaptors")]
+    pub test_result_adaptors: Vec<TestResultAdaptor>,
+}
+
+/// Unity test adaptor structures for TestStarted events
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TestAdaptorContainer {
+    #[serde(rename = "TestAdaptors")]
+    pub test_adaptors: Vec<TestAdaptor>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TestAdaptor {
+    #[serde(rename = "Id")]
+    pub id: String,
+    #[serde(rename = "Name")]
+    pub name: String,
+    #[serde(rename = "FullName")]
+    pub full_name: String,
+    #[serde(rename = "Type")]
+    pub test_type: u32,
+    #[serde(rename = "Parent")]
+    pub parent: i32,
+    #[serde(rename = "Source")]
+    pub source: String,
+    #[serde(rename = "TestCount")]
+    pub test_count: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TestResultAdaptor {
+    #[serde(rename = "TestId")]
+    pub test_id: String,
+    #[serde(rename = "PassCount")]
+    pub pass_count: u32,
+    #[serde(rename = "FailCount")]
+    pub fail_count: u32,
+    #[serde(rename = "InconclusiveCount")]
+    pub inconclusive_count: u32,
+    #[serde(rename = "SkipCount")]
+    pub skip_count: u32,
+    #[serde(rename = "ResultState")]
+    pub result_state: String,
+    #[serde(rename = "StackTrace")]
+    pub stack_trace: String,
+    #[serde(rename = "TestStatus")]
+    pub test_status: u32,
+    #[serde(rename = "AssertCount")]
+    pub assert_count: u32,
+    #[serde(rename = "Duration")]
+    pub duration: f64,
+    #[serde(rename = "StartTime")]
+    pub start_time: i64,
+    #[serde(rename = "EndTime")]
+    pub end_time: i64,
+    #[serde(rename = "Message")]
+    pub message: String,
+    #[serde(rename = "Output")]
+    pub output: String,
+    #[serde(rename = "HasChildren")]
+    pub has_children: bool,
+    #[serde(rename = "Parent")]
+    pub parent: i32,
+}
 
 /// Message types as defined in the Unity Package Messaging Protocol
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,13 +241,13 @@ pub enum UnityEvent {
     ProjectPath(String),
     /// Test run started
     TestRunStarted,
-    /// Test run finished
-    TestRunFinished(String),
-    /// Test started
-    TestStarted(String),
-    /// Test finished
-    TestFinished(String),
-    /// Test list retrieved
+    /// Test run finished with parsed test results
+    TestRunFinished(TestResultAdaptorContainer),
+    /// Test started with parsed test information
+    TestStarted(TestAdaptorContainer),
+    /// Test finished with parsed test results
+    TestFinished(TestResultAdaptorContainer),
+    /// Test list retrieved (keeping as string for now)
     TestListRetrieved(String),
     /// Compilation finished
     CompilationFinished,
@@ -509,9 +578,36 @@ impl UnityMessagingClient {
             
             // Test messages
             MessageType::TestRunStarted => Some(UnityEvent::TestRunStarted),
-            MessageType::TestRunFinished => Some(UnityEvent::TestRunFinished(message.value.clone())),
-            MessageType::TestStarted => Some(UnityEvent::TestStarted(message.value.clone())),
-            MessageType::TestFinished => Some(UnityEvent::TestFinished(message.value.clone())),
+            MessageType::TestRunFinished => {
+                match serde_json::from_str::<TestResultAdaptorContainer>(&message.value) {
+                    Ok(container) => Some(UnityEvent::TestRunFinished(container)),
+                    Err(e) => {
+                        eprintln!("[DEBUG] Failed to deserialize TestRunFinished data: {}", e);
+                        eprintln!("[DEBUG] Raw TestRunFinished data: {}", message.value);
+                        None
+                    }
+                }
+            },
+            MessageType::TestStarted => {
+                match serde_json::from_str::<TestAdaptorContainer>(&message.value) {
+                    Ok(container) => Some(UnityEvent::TestStarted(container)),
+                    Err(e) => {
+                        eprintln!("[DEBUG] Failed to deserialize TestStarted data: {}", e);
+                        eprintln!("[DEBUG] Raw TestStarted data: {}", message.value);
+                        None
+                    }
+                }
+            },
+            MessageType::TestFinished => {
+                match serde_json::from_str::<TestResultAdaptorContainer>(&message.value) {
+                    Ok(container) => Some(UnityEvent::TestFinished(container)),
+                    Err(e) => {
+                        eprintln!("[DEBUG] Failed to deserialize TestFinished data: {}", e);
+                        eprintln!("[DEBUG] Raw TestFinished data: {}", message.value);
+                        None
+                    }
+                }
+            },
             MessageType::TestListRetrieved => Some(UnityEvent::TestListRetrieved(message.value.clone())),
             
             // Compilation messages
