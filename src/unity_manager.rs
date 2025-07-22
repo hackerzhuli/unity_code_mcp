@@ -878,7 +878,7 @@ impl UnityManager {
             );
 
             Ok(RefreshResult {
-                refresh_completed: compilation_finished,
+                refresh_completed: !compilation_started || compilation_finished,
                 refresh_error_message: None,
                 compilation_started: compilation_started,
                 compilation_completed: compilation_finished,
