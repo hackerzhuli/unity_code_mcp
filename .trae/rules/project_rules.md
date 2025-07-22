@@ -55,6 +55,7 @@ This project aims to create a reliable Model Context Protocol (MCP) server that 
 - Manual tests with Unity Editor scenarios
 - Don't create examples binaries(for testing or any other reason), only do unit tests for testing
 - Run test sequentially with `cargo test -- --test-threads=1`, otherwise, Unity Editor related tests can fail.
+- Our tests can take a long time to run(30-60 seconds), so avoid running all tests as much as possible, focus testing individual modules that we're actively working on.
 
 ### Compatibility
 - Target stable Rust versions
