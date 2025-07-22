@@ -145,6 +145,10 @@ To run the test suite:
 ### Building from Source
 
 #### Prerequisites
+- **C Compiler**: Required for building `aws-lc-rs` dependency
+  - Windows: MSVC (Visual Studio Build Tools)
+  - macOS: Xcode Command Line Tools (`xcode-select --install`)
+  - Linux: GCC (`sudo apt-get install build-essential` on Ubuntu/Debian)
 - **CMake**: Required for building the `aws-lc-rs` dependency
   - Windows: Follow the [official guide](https://aws.github.io/aws-lc-rs/requirements/windows.html)
   - macOS: `brew install cmake`
@@ -157,9 +161,6 @@ cargo build
 
 # Release build (recommended for production)
 cargo build --release
-
-# Run with logging
-RUST_LOG=debug cargo run
 ```
 
 ## 🤝 Contributing
