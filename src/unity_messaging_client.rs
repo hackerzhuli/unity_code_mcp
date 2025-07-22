@@ -235,12 +235,12 @@ pub enum UnityEvent {
         level: LogLevel,
         message: String,
     },
-    /// Unity version information
-    Version(String),
+    /// Unity package version information (not Unity Editor version)
+    PackageVersion(String),
     /// Unity project path
     ProjectPath(String),
-    /// Test run started
-    TestRunStarted,
+    /// Test run started with parsed test information
+    TestRunStarted(TestAdaptorContainer),
     /// Test run finished with parsed test results
     TestRunFinished(TestResultAdaptorContainer),
     /// Test started with parsed test information
@@ -567,7 +567,7 @@ impl UnityMessagingClient {
             }),
             
             // Unity state messages
-            MessageType::Version => Some(UnityEvent::Version(message.value.clone())),
+            MessageType::Version => Some(UnityEvent::PackageVersion(message.value.clone())),
             MessageType::ProjectPath => Some(UnityEvent::ProjectPath(message.value.clone())),
             MessageType::Online => Some(UnityEvent::Online),
             MessageType::Offline => Some(UnityEvent::Offline),
@@ -577,7 +577,16 @@ impl UnityMessagingClient {
             },
             
             // Test messages
-            MessageType::TestRunStarted => Some(UnityEvent::TestRunStarted),
+            MessageType::TestRunStarted => {
+                match serde_json::from_str::<TestAdaptorContainer>(&message.value) {
+                    Ok(container) => Some(UnityEvent::TestRunStarted(container)),
+                    Err(e) => {
+                        eprintln!("[DEBUG] Failed to deserialize TestRunStarted data: {}", e);
+                        eprintln!("[DEBUG] Raw TestRunStarted data: {}", message.value);
+                        None
+                    }
+                }
+            },
             MessageType::TestRunFinished => {
                 match serde_json::from_str::<TestResultAdaptorContainer>(&message.value) {
                     Ok(container) => Some(UnityEvent::TestRunFinished(container)),
@@ -720,10 +729,10 @@ impl UnityMessagingClient {
         false
     }
 
-    /// Requests Unity version
+    /// Requests Unity package version (not Unity Editor version)
     /// 
     /// This method sends a version request to Unity. The response will be available
-    /// through the event system as a Version event.
+    /// through the event system as a PackageVersion event.
     /// 
     /// # Returns
     /// 

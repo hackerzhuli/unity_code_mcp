@@ -306,7 +306,7 @@ impl UnityManager {
         }
     }
 
-    /// Get Unity version
+    /// Get Unity package version (not Unity Editor version)
     pub async fn get_unity_version(&mut self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &mut self.messaging_client {
             // Subscribe to events before sending request
@@ -315,13 +315,13 @@ impl UnityManager {
             // Send the version request
             client.get_version().await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             
-            // Wait for the Version event response
+            // Wait for the PackageVersion event response
             let timeout_duration = Duration::from_secs(10);
             
             match timeout(timeout_duration, async {
                 loop {
                     match event_receiver.recv().await {
-                        Ok(UnityEvent::Version(version)) => return Ok(version),
+                        Ok(UnityEvent::PackageVersion(version)) => return Ok(version),
                         Ok(_) => continue,
                         Err(_) => return Err("Event channel closed".into()),
                     }
@@ -435,8 +435,15 @@ impl UnityManager {
                     Ok(Ok(event)) => {
                         println!("[DEBUG] Received event: {:?}", std::mem::discriminant(&event));
                         match event {
-                            UnityEvent::TestRunStarted => {
-                                println!("[DEBUG] Test run started");
+                            UnityEvent::TestRunStarted(container) => {
+                                println!("[DEBUG] Test run started with {} test adaptors", container.test_adaptors.len());
+                                
+                                // Build test ID to name mapping from test run started data
+                                for adaptor in &container.test_adaptors {
+                                    println!("[DEBUG] TestRunStarted adaptor - Id: '{}', Name: '{}', FullName: '{}', Type: {:?}", 
+                                        adaptor.id, adaptor.name, adaptor.full_name, adaptor.test_type);
+                                    test_id_to_name.insert(adaptor.id.clone(), adaptor.full_name.clone());
+                                }
                             },
                             UnityEvent::TestStarted(container) => {
                                 println!("[DEBUG] Test started with {} test adaptors", container.test_adaptors.len());
