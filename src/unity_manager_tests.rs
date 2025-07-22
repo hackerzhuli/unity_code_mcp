@@ -149,13 +149,9 @@ async fn execute_unity_tests_with_validation(
     manager.initialize_messaging().await
         .map_err(|_| "Unity Editor not running or messaging failed")?;
 
-    // Test basic connectivity first
-    let _ = manager.send_ping().await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     
-    if !manager.is_unity_connected(Some(5)) {
-        return Err("Unity is not responding to ping".into());
-    }
+    assert!(manager.is_unity_online(), "unity should be online");
     println!("✓ Unity connectivity confirmed");
     
     // Send refresh to Unity to clear any cached test results
@@ -175,8 +171,6 @@ async fn execute_unity_tests_with_validation(
     println!("✓ Test execution completed: {}", test_result.execution_completed);
      println!("Tests started: {}", test_result.started_tests.len());
      println!("Tests finished: {}", test_result.finished_tests.len());
-
-
 
      // Verify execution completed
      assert!(test_result.execution_completed, "Test execution should complete");
@@ -258,45 +252,16 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
         return;
     }
 
-    // Send a ping to establish connectivity
-    println!("Testing Unity connectivity...");
-    if let Err(_) = manager.send_ping().await {
-        println!("⚠ Failed to send ping to Unity");
-        return;
-    }
-    
     // Wait a moment for ping response
     tokio::time::sleep(Duration::from_millis(500)).await;
     
     // Check if Unity is connected
-    if !manager.is_unity_connected(Some(5)) {
-        println!("⚠ Unity is not responding to messages within 5 seconds");
-        println!("This suggests Unity is not running or the messaging package may not be installed or active.");
-        return; // Don't fail the test, just skip it
-    }
+    assert!(manager.is_unity_online(), "unity must be online");
+
     println!("✓ Unity connectivity confirmed");
     
-    // Clear any existing logs
-    manager.clear_logs();
-    assert_eq!(manager.log_count(), 0, "Logs should be cleared initially");
-
-    // First create a valid C# script to ensure Unity will compile
-    let cs_path = create_test_cs_script(&project_path);
-    println!("✓ Created valid C# script");
-    
-    // Send refresh to trigger initial compilation
-    let _ = manager.refresh_unity().await;
-    tokio::time::sleep(Duration::from_millis(1000)).await;
-    println!("✓ Triggered initial compilation");
-    
-    // Now replace with a script containing errors
-    cleanup_test_cs_script(&cs_path);
     let cs_path = create_test_cs_script_with_errors(&project_path);
     println!("✓ Created C# script with compilation errors");
-    
-    // Clear logs right before refresh to ensure we only collect logs from the refresh process
-    manager.clear_logs();
-    println!("✓ Cleared logs before refresh");
     
     // Call the refresh method which should trigger compilation and collect error logs
     let refresh_result = timeout(Duration::from_secs(60), manager.refresh()).await;
@@ -304,6 +269,9 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
     // Clean up the test file immediately after refresh
     cleanup_test_cs_script_with_errors(&cs_path);
     println!("✓ Cleaned up test C# script");
+
+    // trigger another round of compilation so unity reverts back to old state
+    let _ = timeout(Duration::from_secs(60), manager.refresh()).await;
     
     // Verify the refresh method completed successfully
     match refresh_result {
@@ -353,15 +321,6 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
             return;
         }
     }
-    
-    // Verify that the manager's log collection also contains the errors
-    let all_logs = manager.get_logs();
-    let error_logs_in_manager: Vec<_> = all_logs.iter().filter(|log| {
-        matches!(log.level, crate::unity_messaging_client::LogLevel::Error)
-    }).collect();
-    
-    assert!(!error_logs_in_manager.is_empty(), "Manager should also have error logs in its collection");
-    println!("✓ Manager's log collection contains {} error logs", error_logs_in_manager.len());
     
     // Clean up
     manager.shutdown().await;

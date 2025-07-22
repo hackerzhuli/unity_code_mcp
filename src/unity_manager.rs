@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 
 use crate::unity_messaging_client::{UnityMessagingClient, UnityEvent, UnityMessagingError, LogLevel};
-use crate::unity_project_manager::UnityProjectManager;
+use crate::unity_project_manager::{UnityProjectError, UnityProjectManager};
 
 /// Result of a refresh operation
 #[derive(Debug, Clone)]
@@ -156,7 +156,7 @@ pub struct UnityManager {
 
 impl UnityManager {
     /// Create a new UnityManager for the given Unity project path
-    pub async fn new(project_path: String) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn new(project_path: String) -> Result<Self, UnityProjectError> {
         let project_manager = UnityProjectManager::new(project_path).await?;
         
         Ok(UnityManager {
