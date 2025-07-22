@@ -1,0 +1,1 @@
+- [ ] We might want to handle the big messages that will become tcp in the messaging protocol with our Unity package. It's not needed now because we don't receive big messages from unity usually. Unless of course a test have too many logs which is unlikely.
