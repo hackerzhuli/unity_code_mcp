@@ -8,6 +8,7 @@ use serde_json;
 
 use crate::unity_messaging_client::{UnityMessagingClient, UnityEvent, UnityMessagingError, LogLevel};
 use crate::unity_project_manager::{UnityProjectError, UnityProjectManager};
+use crate::{debug_log, info_log, warn_log, error_log};
 
 /// Result of a refresh operation
 #[derive(Debug, Clone)]
@@ -208,7 +209,7 @@ impl UnityManager {
                                     message: message.clone(),
                                 };
                                     
-                                    println!("[DEBUG] Adding log entry: [{:?}] {}", log_entry.level, log_entry.message);
+                                    debug_log!("Adding log entry: [{:?}] {}", log_entry.level, log_entry.message);
                                     
                                     if let Ok(mut logs_guard) = logs.lock() {
                                         logs_guard.push_back(log_entry);
@@ -229,11 +230,11 @@ impl UnityManager {
                         }
                     },
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        println!("[DEBUG] Log collection lagged, skipped {} messages", skipped);
+                        warn_log!("Log collection lagged, skipped {} messages", skipped);
                         continue;
                     },
                     Err(broadcast::error::RecvError::Closed) => {
-                        println!("[DEBUG] Log collection channel closed, exiting task");
+                        debug_log!("Log collection channel closed, exiting task");
                         break;
                     }
                 }
@@ -411,7 +412,7 @@ impl UnityManager {
             let mut event_receiver = client.subscribe_to_events();
             
             // Send the test execution request directly - TestStarted events will provide the mapping
-            println!("[DEBUG] Sending test filter to Unity: '{}'", filter.to_filter_string());
+            debug_log!("Sending test filter to Unity: '{}'", filter.to_filter_string());
             client.execute_tests(filter).await.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             
             // Collect test execution events
@@ -432,35 +433,35 @@ impl UnityManager {
             while start_time.elapsed() < timeout_duration {
                 match timeout(Duration::from_secs(10), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
-                        println!("[DEBUG] Received event: {:?}", std::mem::discriminant(&event));
+                        debug_log!("Received event: {:?}", std::mem::discriminant(&event));
                         match event {
                             UnityEvent::TestRunStarted(container) => {
-                                println!("[DEBUG] Test run started with {} test adaptors", container.test_adaptors.len());
+                                debug_log!("Test run started with {} test adaptors", container.test_adaptors.len());
                                 
                                 // Build test ID to name mapping from test run started data
                                 for adaptor in &container.test_adaptors {
-                                    println!("[DEBUG] TestRunStarted adaptor - Id: '{}', Name: '{}', FullName: '{}', Type: {:?}", 
+                                    debug_log!("TestRunStarted adaptor - Id: '{}', Name: '{}', FullName: '{}', Type: {:?}", 
                                         adaptor.id, adaptor.name, adaptor.full_name, adaptor.test_type);
                                     test_id_to_name.insert(adaptor.id.clone(), adaptor.full_name.clone());
                                 }
                             },
                             UnityEvent::TestStarted(container) => {
-                                println!("[DEBUG] Test started with {} test adaptors", container.test_adaptors.len());
+                                debug_log!("Test started with {} test adaptors", container.test_adaptors.len());
                                 
                                 // Build test ID to name mapping from parsed data
                                 for adaptor in &container.test_adaptors {
-                                    println!("[DEBUG] TestStarted adaptor - Id: '{}', Name: '{}', FullName: '{}', Type: {:?}", 
+                                    debug_log!("TestStarted adaptor - Id: '{}', Name: '{}', FullName: '{}', Type: {:?}", 
                                         adaptor.id, adaptor.name, adaptor.full_name, adaptor.test_type);
                                     test_id_to_name.insert(adaptor.id.clone(), adaptor.full_name.clone());
                                 }
-                                println!("[DEBUG] Total mappings in test_id_to_name: {}", test_id_to_name.len());
+                                debug_log!("Total mappings in test_id_to_name: {}", test_id_to_name.len());
                             },
                             UnityEvent::TestFinished(container) => {
-                                println!("[DEBUG] Test finished with {} test result adaptors", container.test_result_adaptors.len());
+                                debug_log!("Test finished with {} test result adaptors", container.test_result_adaptors.len());
                                 
                                 // Extract individual test results from parsed data
                                 for adaptor in &container.test_result_adaptors {
-                                    println!("[DEBUG] TestFinished adaptor - TestId: '{}', PassCount: {}, FailCount: {}, ResultState: '{}'", 
+                                    debug_log!("TestFinished adaptor - TestId: '{}', PassCount: {}, FailCount: {}, ResultState: '{}'", 
                                         adaptor.test_id, adaptor.pass_count, adaptor.fail_count, adaptor.result_state);
                                     
                                     // Create SimpleTestResult from TestResultAdaptor
@@ -481,7 +482,7 @@ impl UnityManager {
                                 }
                             },
                             UnityEvent::TestRunFinished(container) => {
-                                println!("[DEBUG] Test run finished");
+                                debug_log!("Test run finished");
                                 
                                 // Only process the first TestRunFinished event to avoid accumulation
                                 if !result.execution_completed {
@@ -491,10 +492,10 @@ impl UnityManager {
                                     if let Some(adaptor) = container.test_result_adaptors.first() {
                                         result.pass_count = adaptor.pass_count;
                                         result.fail_count = adaptor.fail_count;
-                                        println!("[DEBUG] Extracted counts from TestRunFinished: {} passed, {} failed", 
+                                        debug_log!("Extracted counts from TestRunFinished: {} passed, {} failed", 
                                             adaptor.pass_count, adaptor.fail_count);
                                     } else {
-                                        println!("[DEBUG] No test result adaptors in TestRunFinished");
+                                        debug_log!("No test result adaptors in TestRunFinished");
                                     }
                                 }
                                 break;
@@ -609,13 +610,13 @@ impl UnityManager {
                     Ok(Ok(event)) => {
                         match event {
                             UnityEvent::RefreshCompleted(message) => {
-                                println!("[DEBUG] Refresh completed with message: '{}'", message);
+                                debug_log!("Refresh completed with message: '{}'", message);
                                 refresh_response_received = true;
                                 
                                 // Check if refresh failed (non-empty message indicates error)
                                 if !message.is_empty() {
                                     refresh_error_message = Some(message.clone());
-                                    println!("[DEBUG] Refresh failed: {}", message);
+                                    error_log!("Refresh failed: {}", message);
                                     
                                     // Return early with error result
                                     let duration = operation_start.elapsed().as_secs_f64();
@@ -662,7 +663,7 @@ impl UnityManager {
                     Ok(Ok(event)) => {
                         match event {
                             UnityEvent::CompilationStarted => {
-                                println!("[DEBUG] Compilation started");
+                                debug_log!("Compilation started");
                                 compilation_started = true;
                             },
                             _ => {
@@ -686,7 +687,7 @@ impl UnityManager {
                         Ok(Ok(event)) => {
                             match event {
                                 UnityEvent::CompilationFinished => {
-                                    println!("[DEBUG] Compilation finished");
+                                    debug_log!("Compilation finished");
                                     compilation_finished = true;
                                 },
                                 _ => {
@@ -716,10 +717,10 @@ impl UnityManager {
                 }
                 
                 // Wait additional time for error logs to arrive after compilation finishes
-                println!("[DEBUG] Waiting 2 seconds for error logs after compilation finished");
+                debug_log!("Waiting 2 seconds for error logs after compilation finished");
                 tokio::time::sleep(Duration::from_secs(2)).await;
             } else {
-                println!("[DEBUG] No compilation started within 5 seconds");
+                debug_log!("No compilation started within 5 seconds");
             }
             
             // Filter error logs from the existing log collection based on timestamp
@@ -732,7 +733,7 @@ impl UnityManager {
                 .collect();
             
             let duration = operation_start.elapsed().as_secs_f64();
-            println!("[DEBUG] Refresh completed, collected {} error logs in {:.2} seconds", error_logs.len(), duration);
+            debug_log!("Refresh completed, collected {} error logs in {:.2} seconds", error_logs.len(), duration);
             
             Ok(RefreshResult {
                 refresh_completed: true,

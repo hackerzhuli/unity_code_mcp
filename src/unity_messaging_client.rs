@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::time::sleep;
 use crate::unity_manager::TestFilter;
+use crate::{debug_log, info_log, warn_log, error_log};
 
 /// Unity test result structures for proper deserialization
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -416,7 +417,7 @@ impl UnityMessagingClient {
                 _ = ping_interval.tick() => {
                     let ping = Message::ping();
                     if let Err(e) = socket.send_to(&ping.serialize(), unity_address).await {
-                        eprintln!("Failed to send ping: {}", e);
+                        error_log!("Failed to send ping: {}", e);
                         // Mark Unity as offline when ping fails
                         if let Ok(mut online) = is_online.lock() {
                             *online = false;
@@ -449,15 +450,15 @@ impl UnityMessagingClient {
                                 // Debug logging for all received messages except Ping and Pong
                                 if !matches!(message.message_type, MessageType::Ping | MessageType::Pong) {
                                     if message.value.len() < 100 {
-                                        println!("[DEBUG] Received Unity message: {:?} with value: '{}'", message.message_type, message.value);
+                                        debug_log!("Received Unity message: {:?} with value: '{}'", message.message_type, message.value);
                                     }else{
-                                        println!("[DEBUG] Received Unity message: {:?} with value length: '{}' (value omitted)", message.message_type, message.value.len());
+                                        debug_log!("Received Unity message: {:?} with value length: '{}' (value omitted)", message.message_type, message.value.len());
                                     }
                                 }
                                 
                                 // Special logging for log messages
                                 if matches!(message.message_type, MessageType::Info | MessageType::Warning | MessageType::Error) {
-                                    println!("[LOG] Unity {:?}: {}", message.message_type, message.value);
+                                    info_log!("Unity {:?}: {}", message.message_type, message.value);
                                 }
                                 
                                 // Update last response time for any valid message
@@ -492,12 +493,12 @@ impl UnityMessagingClient {
                                     // Parse port and length from message value: "<port>:<length>"
                                     if let Some((port_str, length_str)) = message.value.split_once(':') {
                                         if let (Ok(tcp_port), Ok(expected_length)) = (port_str.parse::<u16>(), length_str.parse::<usize>()) {
-                                            println!("[DEBUG] Received TCP fallback notification: port={}, length={}", tcp_port, expected_length);
+                                            debug_log!("Received TCP fallback notification: port={}, length={}", tcp_port, expected_length);
                                             
                                             // Connect to Unity's TCP server and receive the large message
                                             match Self::receive_tcp_message(tcp_port, expected_length).await {
                                                 Ok(large_message) => {
-                                                    println!("[DEBUG] Successfully received large message via TCP: {:?} with {} bytes", large_message.message_type, large_message.value.len());
+                                                    debug_log!("Successfully received large message via TCP: {:?} with {} bytes", large_message.message_type, large_message.value.len());
                                                     
                                                     // Process the large message normally
                                                     if let Some(event) = Self::message_to_event(&large_message) {
@@ -507,14 +508,14 @@ impl UnityMessagingClient {
                                                     }
                                                 }
                                                 Err(e) => {
-                                                    eprintln!("Failed to receive TCP message: {}", e);
+                                                    error_log!("Failed to receive TCP message: {}", e);
                                                 }
                                             }
                                         } else {
-                                            eprintln!("Invalid TCP message format: {}", message.value);
+                                            error_log!("Invalid TCP message format: {}", message.value);
                                         }
                                     } else {
-                                        eprintln!("Invalid TCP message format: {}", message.value);
+                                        error_log!("Invalid TCP message format: {}", message.value);
                                     }
                                 } else {
                                     // Handle the message and potentially broadcast an event
@@ -529,13 +530,13 @@ impl UnityMessagingClient {
                                 if message.message_type == MessageType::Ping {
                                     let pong = Message::pong();
                                     if let Err(e) = socket.send_to(&pong.serialize(), unity_address).await {
-                                        eprintln!("Failed to send pong response: {}", e);
+                                        error_log!("Failed to send pong response: {}", e);
                                     }
                                 }
                             }
                         }
                         Err(e) => {
-                            eprintln!("Socket error in message listener: {}", e);
+                            error_log!("Socket error in message listener: {}", e);
                             // Mark Unity as offline when socket errors occur
                             if let Ok(mut online) = is_online.lock() {
                                 *online = false;
@@ -582,8 +583,8 @@ impl UnityMessagingClient {
                 match serde_json::from_str::<TestAdaptorContainer>(&message.value) {
                     Ok(container) => Some(UnityEvent::TestRunStarted(container)),
                     Err(e) => {
-                        eprintln!("[DEBUG] Failed to deserialize TestRunStarted data: {}", e);
-                        eprintln!("[DEBUG] Raw TestRunStarted data: {}", message.value);
+                        error_log!("Failed to deserialize TestRunStarted data: {}", e);
+                        debug_log!("Raw TestRunStarted data: {}", message.value);
                         None
                     }
                 }
@@ -592,8 +593,8 @@ impl UnityMessagingClient {
                 match serde_json::from_str::<TestResultAdaptorContainer>(&message.value) {
                     Ok(container) => Some(UnityEvent::TestRunFinished(container)),
                     Err(e) => {
-                        eprintln!("[DEBUG] Failed to deserialize TestRunFinished data: {}", e);
-                        eprintln!("[DEBUG] Raw TestRunFinished data: {}", message.value);
+                        error_log!("Failed to deserialize TestRunFinished data: {}", e);
+                        debug_log!("Raw TestRunFinished data: {}", message.value);
                         None
                     }
                 }
@@ -602,8 +603,8 @@ impl UnityMessagingClient {
                 match serde_json::from_str::<TestAdaptorContainer>(&message.value) {
                     Ok(container) => Some(UnityEvent::TestStarted(container)),
                     Err(e) => {
-                        eprintln!("[DEBUG] Failed to deserialize TestStarted data: {}", e);
-                        eprintln!("[DEBUG] Raw TestStarted data: {}", message.value);
+                        error_log!("Failed to deserialize TestStarted data: {}", e);
+                        debug_log!("Raw TestStarted data: {}", message.value);
                         None
                     }
                 }
@@ -612,8 +613,8 @@ impl UnityMessagingClient {
                 match serde_json::from_str::<TestResultAdaptorContainer>(&message.value) {
                     Ok(container) => Some(UnityEvent::TestFinished(container)),
                     Err(e) => {
-                        eprintln!("[DEBUG] Failed to deserialize TestFinished data: {}", e);
-                        eprintln!("[DEBUG] Raw TestFinished data: {}", message.value);
+                        error_log!("Failed to deserialize TestFinished data: {}", e);
+                        debug_log!("Raw TestFinished data: {}", message.value);
                         None
                     }
                 }
@@ -647,7 +648,7 @@ impl UnityMessagingClient {
     async fn send_message_internal(&self, message: &Message) -> Result<(), UnityMessagingError> {
         // Debug logging for outgoing messages except Ping and Pong
         if !matches!(message.message_type, MessageType::Ping | MessageType::Pong) {
-            println!("[DEBUG] Sending Unity message: {:?} with value: '{}'", message.message_type, message.value);
+            debug_log!("Sending Unity message: {:?} with value: '{}'", message.message_type, message.value);
         }
         
         // Serialize and send the message
