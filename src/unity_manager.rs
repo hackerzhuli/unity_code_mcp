@@ -116,6 +116,9 @@ pub struct TestExecutionResult {
     pub pass_count: u32,
     /// Total number of tests that failed
     pub fail_count: u32,
+    duration_seconds: f64,
+    test_count: u32,
+    skip_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -540,10 +543,13 @@ impl UnityManager {
                 execution_completed: false,
                 pass_count: 0,
                 fail_count: 0,
+                duration_seconds: 0.0,
+                test_count: 0,
+                skip_count: 0,
             };
 
             // Temporary mapping from TestId to test full name for building SimpleTestResult
-            let mut test_id_to_name: HashMap<String, String> = HashMap::new();
+            let mut test_id_to_adapter: HashMap<String, TestAdaptor> = HashMap::new();
 
             let timeout_duration = Duration::from_secs(300); // 5 minutes for test execution
             let start_time = std::time::Instant::now();
@@ -559,19 +565,6 @@ impl UnityManager {
                                     "Test run started with {} test adaptors",
                                     container.test_adaptors.len()
                                 );
-
-                                // Build test ID to name mapping from test run started data
-                                for adaptor in &container.test_adaptors {
-                                    debug_log!(
-                                        "TestRunStarted adaptor - Id: '{}', Name: '{}', FullName: '{}', Type: {:?}",
-                                        adaptor.id,
-                                        adaptor.name,
-                                        adaptor.full_name,
-                                        adaptor.test_type
-                                    );
-                                    test_id_to_name
-                                        .insert(adaptor.id.clone(), adaptor.full_name.clone());
-                                }
                             }
                             UnityEvent::TestStarted(container) => {
                                 debug_log!(
@@ -579,7 +572,7 @@ impl UnityManager {
                                     container.test_adaptors.len()
                                 );
 
-                                // Build test ID to name mapping from parsed data
+                                // Build test ID to adaptor mapping from parsed data
                                 for adaptor in &container.test_adaptors {
                                     debug_log!(
                                         "TestStarted adaptor - Id: '{}', Name: '{}', FullName: '{}', Type: {:?}",
@@ -588,12 +581,12 @@ impl UnityManager {
                                         adaptor.full_name,
                                         adaptor.test_type
                                     );
-                                    test_id_to_name
-                                        .insert(adaptor.id.clone(), adaptor.full_name.clone());
+                                    test_id_to_adapter
+                                        .insert(adaptor.id.clone(), adaptor.clone());
                                 }
                                 debug_log!(
-                                    "Total mappings in test_id_to_name: {}",
-                                    test_id_to_name.len()
+                                    "Total mappings in test_id_to_adapter: {}",
+                                    test_id_to_adapter.len()
                                 );
                             }
                             UnityEvent::TestFinished(container) => {
@@ -618,23 +611,18 @@ impl UnityManager {
                                     }
 
                                     // Create SimpleTestResult from TestResultAdaptor
-                                    let full_name = test_id_to_name
-                                        .get(&adaptor.test_id)
-                                        .cloned()
-                                        .unwrap_or_else(|| {
-                                            format!("Unknown test (ID: {})", adaptor.test_id)
-                                        });
+                                    if let Some(testAdapter) = test_id_to_adapter.get(&adaptor.test_id){
+                                            let simple_result = SimpleTestResult {
+                                            full_name: testAdapter.full_name.clone(),
+                                            error_stack_trace: adaptor.stack_trace.clone(),
+                                            passed: adaptor.result_state == "Passed",
+                                            duration_seconds: adaptor.duration,
+                                            error_message: adaptor.message.clone(),
+                                            output_logs: adaptor.output.clone(),
+                                        };
 
-                                    let simple_result = SimpleTestResult {
-                                        full_name,
-                                        error_stack_trace: adaptor.stack_trace.clone(),
-                                        passed: adaptor.result_state == "Passed",
-                                        duration_seconds: adaptor.duration,
-                                        error_message: adaptor.message.clone(),
-                                        output_logs: adaptor.output.clone(),
-                                    };
-
-                                    result.test_results.push(simple_result);
+                                        result.test_results.push(simple_result);        
+                                    }
                                 }
                             }
                             UnityEvent::TestRunFinished(container) => {
@@ -648,6 +636,13 @@ impl UnityManager {
                                     if let Some(adaptor) = container.test_result_adaptors.first() {
                                         result.pass_count = adaptor.pass_count;
                                         result.fail_count = adaptor.fail_count;
+                                        result.skip_count = adaptor.skip_count;
+                                        result.duration_seconds = adaptor.duration;
+                                        result.test_count = adaptor.pass_count + adaptor.fail_count + adaptor.skip_count;
+                                        if let Some(testAdapter) = test_id_to_adapter.get(&adaptor.test_id){
+                                            result.test_count = testAdapter.test_count;
+                                        }
+                                        
                                         debug_log!(
                                             "Extracted counts from TestRunFinished: {} passed, {} failed",
                                             adaptor.pass_count,

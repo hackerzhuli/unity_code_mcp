@@ -176,7 +176,7 @@ impl UnityCodeMcpServer {
                             "passed": test.passed,
                             "duration_seconds": test.duration_seconds,
                             "error_message": test.error_message,
-                            "stack_trace": test.error_stack_trace,
+                            "error_stack_trace": test.error_stack_trace,
                             "output_logs": test.output_logs
                         })
                     }).collect::<Vec<_>>()
