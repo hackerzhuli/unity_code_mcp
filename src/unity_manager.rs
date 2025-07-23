@@ -115,7 +115,10 @@ pub struct UnityLogEntry {
 pub struct UnityManager {
     messaging_client: Option<UnityMessagingClient>,
     project_manager: UnityProjectManager,
-    logs: Arc<Mutex<VecDeque<UnityLogEntry>>>,
+    /// logs, we keep accumulated logs
+    /// Only clear when enter play mode or start compilation
+    /// It can mean we can have millions of these but it's ok since we don't really search through the whole thing
+    logs: Arc<Mutex<Vec<UnityLogEntry>>>,
     current_unity_pid: Option<u32>,
     /// Time of the last compilation finish
     last_compilation_finished: Arc<Mutex<Option<SystemTime>>>,
@@ -137,7 +140,7 @@ impl UnityManager {
         Ok(UnityManager {
             messaging_client: None,
             project_manager,
-            logs: Arc::new(Mutex::new(VecDeque::new())),
+            logs: Arc::new(Mutex::new(Vec::new())),
             current_unity_pid: None,
             last_compilation_finished: Arc::new(Mutex::new(None)),
             current_test_run_id: Arc::new(Mutex::new(None)),
@@ -296,16 +299,13 @@ impl UnityManager {
                                 );
 
                                 if let Ok(mut logs_guard) = logs.lock() {
-                                    logs_guard.push_back(log_entry);
+                                    logs_guard.push(log_entry);
 
                                     //println!("[DEBUG] Total logs now: {}", logs_guard.len());
                                 }
                             }
                             UnityEvent::CompilationStarted => {
                                 // Clear logs when compilation starts to prevent memory growth
-                                debug_log!(
-                                    "Compilation started - clearing logs to prevent memory growth"
-                                );
                                 if let Ok(mut logs_guard) = logs.lock() {
                                     logs_guard.clear();
                                 }
@@ -369,6 +369,13 @@ impl UnityManager {
                                         if playing { "Playing" } else { "Stopped" }
                                     );
                                 }
+
+                                if playing {
+                                    // Clear logs when play mode starts to prevent memory growth (similar to Unity Editor's behaviour)
+                                    if let Ok(mut logs_guard) = logs.lock() {
+                                        logs_guard.clear();
+                                    }
+                                }
                             }
                             _ => {}
                         }
@@ -424,7 +431,7 @@ impl UnityManager {
     /// # Returns
     /// Vector of log messages (extracted main messages) that match the criteria
     fn get_recent_logs(
-        logs: &Arc<Mutex<VecDeque<UnityLogEntry>>>,
+        logs: &Arc<Mutex<Vec<UnityLogEntry>>>,
         after_time: SystemTime,
         level_filter: Option<LogLevel>,
         substring_pattern: Option<&str>,
