@@ -181,8 +181,12 @@ pub struct UnityManager {
     event_receiver: Option<broadcast::Receiver<UnityEvent>>,
     is_listening: bool,
     current_unity_pid: Option<u32>,
+    /// Time of the last compilation finish
     last_compilation_finished: Arc<Mutex<Option<SystemTime>>>,
+    /// ID of the current test run in Unity Editor
     current_test_run_id: Arc<Mutex<Option<String>>>,
+    /// Whether Unity Editor is currently in play mode
+    is_in_play_mode: Arc<Mutex<bool>>,
 }
 
 impl UnityManager {
@@ -201,6 +205,7 @@ impl UnityManager {
             current_unity_pid: None,
             last_compilation_finished: Arc::new(Mutex::new(None)),
             current_test_run_id: Arc::new(Mutex::new(None)),
+            is_in_play_mode: Arc::new(Mutex::new(false)),
         })
     }
 
@@ -228,6 +233,14 @@ impl UnityManager {
             }
 
             self.clear_logs();
+
+            // Reset state fields to clean state for new Unity process
+            if let Ok(mut test_run_guard) = self.current_test_run_id.lock() {
+                *test_run_guard = None;
+            }
+            if let Ok(mut play_mode_guard) = self.is_in_play_mode.lock() {
+                *play_mode_guard = false;
+            }
 
             // Clean up existing connection if any
             self.cleanup_messaging_client().await;
@@ -323,6 +336,7 @@ impl UnityManager {
         let seen_logs = Arc::clone(&self.seen_logs);
         let last_compilation_finished = Arc::clone(&self.last_compilation_finished);
         let current_test_run_id = Arc::clone(&self.current_test_run_id);
+        let is_in_play_mode = Arc::clone(&self.is_in_play_mode);
         let max_logs = self.max_logs;
 
         tokio::spawn(async move {
@@ -406,6 +420,13 @@ impl UnityManager {
                                     }
                                 }
                             }
+                            UnityEvent::IsPlaying(playing) => {
+                                // Track Unity's play mode state
+                                if let Ok(mut play_mode_guard) = is_in_play_mode.lock() {
+                                    *play_mode_guard = playing;
+                                    debug_log!("Unity play mode changed: {}", if playing { "Playing" } else { "Stopped" });
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -482,6 +503,19 @@ impl UnityManager {
     pub fn is_unity_running_tests(&self) -> bool {
         if let Ok(test_run_guard) = self.current_test_run_id.lock() {
             test_run_guard.is_some()
+        } else {
+            false
+        }
+    }
+
+    /// Check if Unity is currently in Play mode
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if Unity is currently in Play mode, `false` otherwise
+    pub fn is_unity_in_play_mode(&self) -> bool {
+        if let Ok(play_mode_guard) = self.is_in_play_mode.lock() {
+            *play_mode_guard
         } else {
             false
         }
@@ -613,6 +647,11 @@ impl UnityManager {
         // Check if Unity is currently running tests to avoid conflicts
         if self.is_unity_running_tests() {
             return Err("Cannot start a new test run because Unity Editor is still running tests, please try again later.".into());
+        }
+
+        // Check if Unity is currently in Play mode to avoid conflicts
+        if self.is_unity_in_play_mode() {
+            return Err("Cannot start a new test run because Unity Editor is in Play mode, please stop Play mode and try again.".into());
         }
 
         if let Some(client) = &mut self.messaging_client {
@@ -795,6 +834,11 @@ impl UnityManager {
         // Check if Unity is currently running tests to avoid conflicts
         if self.is_unity_running_tests() {
             return Err("Cannot refresh asset database because Unity Editor is still running tests, please try again later.".into());
+        }
+
+        // Check if Unity is currently in Play mode to avoid conflicts
+        if self.is_unity_in_play_mode() {
+            return Err("Cannot refresh asset database because Unity Editor is in Play mode, please stop Play mode and try again.".into());
         }
 
         if let Some(client) = &mut self.messaging_client {
