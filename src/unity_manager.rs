@@ -15,9 +15,6 @@ use crate::{debug_log, error_log, info_log, warn_log};
 
 // Timing constants for refresh operations
 
-/// Timeout in seconds for sending messages to Unity (e.g. wait until unity finish compilation or importing assets)
-const SEND_MESSAGE_TIMEOUT_SECS: u64 = 60;
-
 /// Total timeout in seconds for the refresh operation(after sent, not including compilation)
 const REFRESH_TOTAL_TIMEOUT_SECS: u64 = 60;
 
@@ -35,14 +32,16 @@ const POST_COMPILATION_WAIT_SECS: u64 = 1;
 /// Timeout in seconds for an individual test to complete after it starts
 /// 
 /// Note: The timeout is different in debug and release build for easy testing, with a debug build, individual tests should not take longer than 5 seconds.
-/// While in a release build, individual tests can take as long as 120 seconds
-const TEST_TIMEOUT_SECS: u64 = if cfg!(debug_assertions) { 5 } else { 120 };
+/// While in a release build, individual tests can take as long as 180 seconds
+const TEST_TIMEOUT_SECS: u64 = if cfg!(debug_assertions) { 5 } else { 180 };
 
 /// Timeout in seconds to wait for the next test to start
 const TEST_START_TIMEOUT_SECS: u64 = 3;
 
-/// Timeout in seconds to wait for TestRunStarted event
-const TEST_RUN_START_TIMEOUT_SECS: u64 = 5;
+/// Timeout in seconds to wait for TestRunStarted event, this need to be a little bit longer, because Unity Editor can be busy(doing anything other than compilation, e.g. importing assets or running tests)
+/// Test message is sent, if we don't wait for test to start, then Unity Editor will still run tests after it have time to
+/// If we try too frequently, then Unity Editor will keep running tests, we will get into a busy loop
+const TEST_RUN_START_TIMEOUT_SECS: u64 = 180;
 
 /// Result of a refresh operation
 #[derive(Debug, Clone)]
@@ -557,7 +556,7 @@ impl UnityManager {
     pub async fn refresh_unity(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &mut self.messaging_client {
             client
-                .send_refresh_message(Some(SEND_MESSAGE_TIMEOUT_SECS))
+                .send_refresh_message(None)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         } else {
@@ -589,7 +588,7 @@ impl UnityManager {
             );
 
             client
-                .execute_tests(filter, Some(SEND_MESSAGE_TIMEOUT_SECS))
+                .execute_tests(filter, None)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
@@ -723,7 +722,7 @@ impl UnityManager {
                     }
                     Err(_) => {
                         if run_start_time.is_none() && execute_test_message_sent_time.elapsed() >= Duration::from_secs(TEST_RUN_START_TIMEOUT_SECS) {
-                            return Err(format!("Test run didn't start within {} seconds", TEST_RUN_START_TIMEOUT_SECS).into());
+                            return Err(format!("Test run didn't start within {} seconds. Hint: Unity Editor is busy and can't respond now, please try again later.", TEST_RUN_START_TIMEOUT_SECS).into());
                         }
 
                         // check for time out in tests
@@ -763,7 +762,7 @@ impl UnityManager {
 
             // Send the refresh message, allow configured timeout to send
             client
-                .send_refresh_message(Some(SEND_MESSAGE_TIMEOUT_SECS))
+                .send_refresh_message(None)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             //println!("[DEBUG] Refresh message sent");

@@ -289,9 +289,9 @@ pub enum UnityMessagingError {
     IoError(#[from] std::io::Error),
     #[error("Invalid message: {0}")]
     InvalidMessage(String),
-    #[error("Timeout error")]
-    Timeout,
-    #[error("Unity process not found")]
+    #[error("Timeout error: {0}")]
+    Timeout(String),
+    #[error("No Unity Editor process is running for this project, make sure you have started Unity Editor")]
     ProcessNotFound,
     #[error("Event listener task failed")]
     TaskFailed,
@@ -728,7 +728,7 @@ impl UnityMessagingClient {
             // Wait for Unity to be online
             while !self.is_online() {
                 if start_time.elapsed() >= timeout {
-                    return Err(UnityMessagingError::Timeout);
+                    return Err(UnityMessagingError::Timeout(format!("Timeout waiting for Unity Editor to be available after {:?}, Unity Editor is busy compiling scripts, please try again later.", timeout)));
                 }
 
                 // Sleep for a short time before checking again
