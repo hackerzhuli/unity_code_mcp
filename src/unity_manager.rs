@@ -123,6 +123,8 @@ pub struct UnityManager {
     current_test_run_id: Arc<Mutex<Option<String>>>,
     /// Whether Unity Editor is currently in play mode
     is_in_play_mode: Arc<Mutex<bool>>,
+    /// Stored compile errors from the last compilation
+    last_compile_errors: Arc<Mutex<Vec<String>>>,
 }
 
 const MESSAGING_CLIENT_NOT_INIT_ERROR: &'static str = "Messaging client not initialized, this is likely because Unity Editor is not running for this project.";
@@ -140,6 +142,7 @@ impl UnityManager {
             last_compilation_finished: Arc::new(Mutex::new(None)),
             current_test_run_id: Arc::new(Mutex::new(None)),
             is_in_play_mode: Arc::new(Mutex::new(false)),
+            last_compile_errors: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -270,6 +273,7 @@ impl UnityManager {
         let last_compilation_finished = Arc::clone(&self.last_compilation_finished);
         let current_test_run_id = Arc::clone(&self.current_test_run_id);
         let is_in_play_mode = Arc::clone(&self.is_in_play_mode);
+        let last_compile_errors = Arc::clone(&self.last_compile_errors);
 
         tokio::spawn(async move {
             //println!("[DEBUG] Log collection task started");
@@ -308,10 +312,42 @@ impl UnityManager {
                             }
                             UnityEvent::CompilationFinished => {
                                 // Update the last compilation finished timestamp
+                                let compilation_time = SystemTime::now();
                                 if let Ok(mut timestamp_guard) = last_compilation_finished.lock() {
-                                    *timestamp_guard = Some(SystemTime::now());
+                                    *timestamp_guard = Some(compilation_time);
                                     debug_log!("Updated last compilation finished timestamp");
                                 }
+                                
+                                // Spawn a task to collect compile errors for 1 second
+                                let logs_clone = Arc::clone(&logs);
+                                let compile_errors_clone = Arc::clone(&last_compile_errors);
+                                tokio::spawn(async move {
+                                    // Wait for 1 second to collect compile errors
+                                    tokio::time::sleep(Duration::from_secs(1)).await;
+                                    
+                                    let mut compile_errors = Vec::new();
+                                    if let Ok(logs_guard) = logs_clone.lock() {
+                                        // Collect compile errors from the last 1 second
+                                        let end_time = compilation_time + Duration::from_secs(1);
+                                        let collected_errors: Vec<String> = logs_guard
+                                            .iter()
+                                            .filter(|log| {
+                                                log.level == LogLevel::Error
+                                                    && log.timestamp >= compilation_time
+                                                    && log.timestamp <= end_time
+                                                    && log.message.contains("error CS")
+                                            })
+                                            .map(|log| unity_log_utils::extract_main_message(&log.message))
+                                            .collect();
+                                        compile_errors.extend(collected_errors);
+                                    }
+                                    
+                                    // Store the collected compile errors
+                                    if let Ok(mut errors_guard) = compile_errors_clone.lock() {
+                                        *errors_guard = compile_errors;
+                                        debug_log!("Collected {} compile errors after compilation", errors_guard.len());
+                                    }
+                                });
                             }
                             UnityEvent::TestRunStarted(container) => {
                                 // Track the root test run ID
@@ -975,19 +1011,11 @@ impl UnityManager {
             logs.extend(refresh_logs);
 
             if !compilation_started {
-                // Get previous compile errors (only "error CS" pattern)
-                if let Some(last_compilation_time) = last_compile_time_option {
-                    let previous_compile_errors: Vec<String> = logs_guard
-                        .iter()
-                        .filter(|log| {
-                            log.level == LogLevel::Error
-                                && log.timestamp >= last_compilation_time
-                                && log.timestamp <= last_compilation_time + Duration::from_secs(3)
-                                && log.message.contains("error CS")
-                        })
-                        .map(|log| unity_log_utils::extract_main_message(&log.message))
-                        .collect();
-                    logs.extend(previous_compile_errors);
+                // Get previous compile errors from stored vector
+                if last_compile_time_option.is_some() {
+                    if let Ok(errors_guard) = self.last_compile_errors.lock() {
+                        logs.extend(errors_guard.clone());
+                    }
                 }
             }
         }
