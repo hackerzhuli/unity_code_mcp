@@ -1,14 +1,15 @@
 # Unity Code MCP Server
 
-> A **coding-focused** Model Context Protocol (MCP) server that enables AI agents to write Unity code autonomously, surviving domain reloads and compilation cycles.
+## Description
+Unity Code MCP is a coding focused Model Context Protocol (MCP) server that enables AI agents to write Unity code autonomously.
 
 ## 🎯 Why Unity Code MCP?
 
-Unity Code MCP is laser-focused on coding. It's can handle Unity's compilation cycles gracefully while providing only the essential tools needed for autonomous code development: compilation feedback and test execution.
+Unity Code MCP is focused on coding. It can handle Unity's compilation cycles gracefully while providing only the essential tools needed for autonomous code development: compilation feedback and test execution.
 
 Other Unity MCP servers typically fail when Unity is compiling or performing domain reloads, causing AI tool calls to report an error and AI agents confused about what is going on.
 
-This enables AI agents to develop Unity code autonomously, handling compilation and testing without human intervention.
+This MCP server enables AI agents to develop Unity code autonomously, write code, compile, fix compile errors, test, fixed bugs, repeat, just like how a human would.
 
 ## ✨ Key Features
 
@@ -16,7 +17,6 @@ This enables AI agents to develop Unity code autonomously, handling compilation 
 - **⚡ Performance-Focused**: Minimal token usage with essential operations
 - **🧪 Test-Driven**: Comprehensive test execution and reporting capabilities
 - **📦 Self-Contained**: Single binary with no runtime dependencies (no Node.js, Python, or .NET required)
-- **🚀 High Performance**: Built in Rust for speed and minimal resource usage
 
 ## 🛠️ MCP Server Tools
 
