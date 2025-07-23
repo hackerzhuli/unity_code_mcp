@@ -18,7 +18,7 @@ This enables AI agents to develop Unity code autonomously, handling compilation 
 - **📦 Self-Contained**: Single binary with no runtime dependencies (no Node.js, Python, or .NET required)
 - **🚀 High Performance**: Built in Rust for speed and minimal resource usage
 
-## 🛠️ Core Capabilities
+## 🛠️ MCP Server Tools
 
 Unity Code MCP provides **exactly two tools** designed for autonomous code development:
 
