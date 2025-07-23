@@ -2,7 +2,8 @@ use std::time::Duration;
 use tokio::time::{sleep, timeout};
 
 use crate::test_utils::{cleanup_test_uss_file, create_test_uss_file, get_unity_project_path, create_test_cs_script_with_errors, cleanup_test_cs_script_with_errors};
-use crate::unity_manager::{TestFilter, TestMode, UnityManager};
+use crate::unity_manager::UnityManager;
+use crate::unity_messages::{LogLevel, TestFilter, TestMode};
 
 /// Expected test result for individual test validation
 #[derive(Debug, Clone)]
@@ -90,9 +91,9 @@ async fn test_unity_manager_log_collection() {
     println!("✓ Log collection functionality working correctly - {} total logs", all_logs.len());
     
     // Verify we have logs with different levels
-    let has_info = all_logs.iter().any(|log| matches!(log.level, crate::unity_messaging_client::LogLevel::Info));
-    let has_warning = all_logs.iter().any(|log| matches!(log.level, crate::unity_messaging_client::LogLevel::Warning));
-    let has_error = all_logs.iter().any(|log| matches!(log.level, crate::unity_messaging_client::LogLevel::Error));
+    let has_info = all_logs.iter().any(|log| matches!(log.level, LogLevel::Info));
+    let has_warning = all_logs.iter().any(|log| matches!(log.level, LogLevel::Warning));
+    let has_error = all_logs.iter().any(|log| matches!(log.level, LogLevel::Error));
     
     println!("Log levels present - Info: {}, Warning: {}, Error: {}", has_info, has_warning, has_error);
 

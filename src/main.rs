@@ -8,8 +8,9 @@ mod unity_manager;
 mod unity_manager_tests;
 mod unity_messaging_client;
 mod unity_project_manager;
+mod unity_messages;
 
-use crate::logging::init_logging;
+use crate::{logging::init_logging, unity_messages::{TestFilter, TestMode}};
 use log::{error, info};
 use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
@@ -21,7 +22,7 @@ use rmcp::{
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use unity_manager::{TestFilter, TestMode, UnityManager};
+use unity_manager::{UnityManager};
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct RunTestsRequest {

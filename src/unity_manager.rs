@@ -6,7 +6,7 @@ use tokio::time::timeout;
 
 use crate::unity_log_utils;
 use crate::unity_messaging_client::{
-    LogLevel, UnityEvent, UnityMessagingClient,
+    UnityMessagingClient,
 };
 use crate::unity_project_manager::{UnityProjectError, UnityProjectManager};
 use crate::{debug_log, error_log, info_log, warn_log};
@@ -57,42 +57,7 @@ pub struct RefreshResult {
 }
 
 // Test-related structures are now imported from unity_messaging_client
-use crate::unity_messaging_client::{TestAdaptor};
-
-/// Test mode for Unity tests
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TestMode {
-    /// Edit mode tests (run in the editor without entering play mode)
-    EditMode,
-    /// Play mode tests (run in play mode)
-    PlayMode,
-}
-
-impl TestMode {
-    /// Convert to string representation used by Unity
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            TestMode::EditMode => "EditMode",
-            TestMode::PlayMode => "PlayMode",
-        }
-    }
-}
-
-/// Test execution filter options
-#[derive(Debug, Clone)]
-pub enum TestFilter {
-    /// Execute all tests in the specified mode
-    All(TestMode),
-    /// Execute all tests in a specific assembly
-    Assembly {
-        mode: TestMode,
-        assembly_name: String,
-    },
-    /// Execute a specific test by its full name
-    Specific { mode: TestMode, test_name: String },
-    /// Execute tests matching a custom filter string
-    Custom { mode: TestMode, filter: String },
-}
+use crate::unity_messages::{LogLevel, TestAdaptor, TestFilter, UnityEvent};
 
 /// tracking running state of individual tests
 #[derive(Debug, Clone)]
@@ -100,27 +65,6 @@ struct TestState {
     start_time: std::time::Instant,
     finish_time: Option<std::time::Instant>,
     adapater: TestAdaptor,
-}
-
-impl TestFilter {
-    /// Convert to the filter string format expected by Unity
-    pub fn to_filter_string(&self) -> String {
-        match self {
-            TestFilter::All(mode) => mode.as_str().to_string(),
-            TestFilter::Assembly {
-                mode,
-                assembly_name,
-            } => {
-                format!("{}:{}", mode.as_str(), assembly_name)
-            }
-            TestFilter::Specific { mode, test_name } => {
-                format!("{}:{}", mode.as_str(), test_name)
-            }
-            TestFilter::Custom { mode, filter } => {
-                format!("{}:{}", mode.as_str(), filter)
-            }
-        }
-    }
 }
 
 /// Simplified test result containing only essential information

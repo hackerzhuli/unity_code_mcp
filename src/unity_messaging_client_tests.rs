@@ -1,7 +1,7 @@
+use crate::unity_messages::TestMode;
 use crate::unity_project_manager::UnityProjectManager;
 use crate::test_utils::*;
 use crate::unity_messaging_client::*;
-use crate::unity_manager::{TestFilter, TestMode};
 use std::time::Duration;
 
 #[test]
@@ -69,7 +69,7 @@ async fn test_unity_messaging_integration() {
     // Wait a moment for potential Unity responses
     tokio::time::sleep(Duration::from_millis(500)).await;
     
-    match client.is_connected(Some(5)) {
+    match client.is_online() {
         true => println!("✓ Connection test passed - Unity is responding"),
         false => {
             println!("Connection test failed - Unity not responding recently");
