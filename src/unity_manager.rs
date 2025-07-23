@@ -305,7 +305,9 @@ impl UnityManager {
         debug_log!("Updating Unity connection status");
 
         // Update process info
-        self.project_manager.update_process_info().await?;
+        // ignore error here, we just want to extract process id later
+        // it will error if unity editor is not running
+        let _ = self.project_manager.update_process_info().await; 
         let current_pid = self.project_manager.unity_process_id();
 
         // Check if Unity process changed
