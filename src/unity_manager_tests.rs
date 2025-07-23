@@ -29,13 +29,7 @@ async fn test_unity_manager_log_collection() {
         return;
     }
 
-    // Give the listener task a moment to start up
-    sleep(Duration::from_millis(500)).await;
-
-    // Test basic connectivity by checking if Unity is online FIRST
-    println!("Testing Unity connectivity...");
-    assert!(manager.is_unity_online(), "Unity should be online");
-    println!("✓ Unity connectivity confirmed");
+    manager.wait_online(3).await.unwrap();
     
     // Create a USS file with invalid syntax to trigger warning logs
     let uss_path = create_test_uss_file(&project_path);
@@ -255,13 +249,7 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
         return;
     }
 
-    // Wait a moment for ping response
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    
-    // Check if Unity is connected
-    assert!(manager.is_unity_online(), "unity must be online");
-
-    println!("✓ Unity connectivity confirmed");
+    manager.wait_online(3).await.unwrap();
     
     let cs_path = create_test_cs_script_with_errors(&project_path);
     println!("✓ Created C# script with compilation errors");
