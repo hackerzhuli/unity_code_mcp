@@ -602,6 +602,8 @@ impl UnityManager {
 
             let mut run_start_time: Option<Instant> = None;
 
+            let mut root_test_adaptor : Option<TestAdaptor> = None;
+
             // Wait for test execution to complete
             loop {
                 match timeout(Duration::from_secs(3), event_receiver.recv()).await {
@@ -614,6 +616,7 @@ impl UnityManager {
                                     container.test_adaptors.len()
                                 );
                                 run_start_time = Some(Instant::now());
+                                root_test_adaptor = Some(container.test_adaptors[0].clone());
                             }
                             UnityEvent::TestStarted(container) => {
                                 debug_log!(
@@ -716,7 +719,7 @@ impl UnityManager {
                         }
                     }
                     Ok(Err(_)) => {
-                        return Ok(self.create_test_result_with_error(test_results, test_states, "Event channel closed during test execution"));
+                        return Ok(self.create_test_result_with_error(root_test_adaptor, test_results, test_states, "Event channel closed during test execution"));
                     }
                     Err(_) => {
                         if run_start_time.is_none() && execute_test_message_sent_time.elapsed() >= Duration::from_secs(TEST_RUN_START_TIMEOUT_SECS) {
@@ -726,14 +729,15 @@ impl UnityManager {
                         // check for time out in tests
                         if let Err(e) = self.check_test_timeout(&mut test_states, run_start_time) {
                             // Return results with error message instead of just error
-                            return Ok(self.create_test_result_with_error(test_results, test_states, e.as_str()));
+                            return Ok(self.create_test_result_with_error(root_test_adaptor, test_results, test_states, e.as_str()));
+
                         }
                     }
                 }
             }
 
-            // this should never occur
-            Ok(self.create_test_result_with_error(test_results, test_states, "Some internal error occured during test execution"))
+            // this should not occur
+            Ok(self.create_test_result_with_error(root_test_adaptor, test_results, test_states, "Some internal error occured during test execution"))
         } else {
             Err("Messaging client not initialized. Unity Editor is not running or we are unable to connect to it.".into())
         }
@@ -1003,7 +1007,7 @@ impl UnityManager {
             }
             // test is running
             else{
-                if test_state.start_time.elapsed() > Duration::from_secs(TEST_TIMEOUT_SECS) {
+                if !test_state.adapater.has_children && test_state.start_time.elapsed() > Duration::from_secs(TEST_TIMEOUT_SECS) {
                     return Err(format!("Test timeout waiting for test {} to finish, after {} seconds", test_state.adapater.full_name, TEST_TIMEOUT_SECS));
                 }
 
@@ -1026,7 +1030,7 @@ impl UnityManager {
     }
     
     /// Create test result with error
-    fn create_test_result_with_error(&self, test_results: Vec<SimpleTestResult>, test_states: HashMap<String, TestState>, error_message: &str) -> TestExecutionResult {
+    fn create_test_result_with_error(&self, root_test_adaptor: Option<TestAdaptor>, test_results: Vec<SimpleTestResult>, test_states: HashMap<String, TestState>, error_message: &str) -> TestExecutionResult {
         // let's count the tests
         let mut pass_count = 0;
         let mut fail_count = 0;
@@ -1036,6 +1040,11 @@ impl UnityManager {
             }else{
                 fail_count += 1;
             }
+        }
+
+        let mut test_count = pass_count + fail_count;
+        if root_test_adaptor.is_some() {
+            test_count = root_test_adaptor.unwrap().test_count;
         }
 
         // also count non fishied test as failed
@@ -1065,8 +1074,8 @@ impl UnityManager {
             pass_count,
             fail_count,
             duration_seconds,
-            test_count: pass_count + fail_count,
-            skip_count: 0,
+            test_count: test_count,
+            skip_count: test_count - pass_count - fail_count,
         }
     }
 }

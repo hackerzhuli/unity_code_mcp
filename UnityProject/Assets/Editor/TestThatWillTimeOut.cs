@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEditor;
 using UnityEngine.TestTools;
 using System.Collections;
+using System.Threading;
 
 namespace TestExecution.Editor
 {
@@ -13,12 +14,12 @@ namespace TestExecution.Editor
             Debug.Log("NormalTest");
         }
 
-        [UnityTest]
-        public IEnumerator LongTest()
+        [Test]
+        public void LongTest()
         {
             // a test that will timeout our tool call(for debug builds, but not for release builds)
             Debug.Log("LongTest");
-            yield return new WaitForSeconds(10);
+            Thread.Sleep(10000);
         }
     }
 }
