@@ -176,7 +176,6 @@ pub struct UnityManager {
     logs: Arc<Mutex<VecDeque<UnityLogEntry>>>,
     seen_logs: Arc<Mutex<HashSet<String>>>,
     max_logs: usize,
-    event_receiver: Option<broadcast::Receiver<UnityEvent>>,
     is_listening: bool,
     current_unity_pid: Option<u32>,
     /// Time of the last compilation finish
@@ -200,7 +199,6 @@ impl UnityManager {
             logs: Arc::new(Mutex::new(VecDeque::new())),
             seen_logs: Arc::new(Mutex::new(HashSet::new())),
             max_logs: 1000, // Keep last 1000 log entries
-            event_receiver: None,
             is_listening: false,
             current_unity_pid: None,
             last_compilation_finished: Arc::new(Mutex::new(None)),
@@ -294,7 +292,6 @@ impl UnityManager {
         }
 
         self.current_unity_pid = None;
-        self.event_receiver = None;
 
         debug_log!("Messaging client cleaned up");
     }
@@ -1179,7 +1176,6 @@ impl Drop for UnityManager {
         }
 
         self.current_unity_pid = None;
-        self.event_receiver = None;
         self.is_listening = false;
     }
 }
