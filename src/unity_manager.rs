@@ -171,16 +171,6 @@ impl UnityManager {
                 return Ok(()); // Already connected to this Unity instance
             }
 
-            self.clear_logs();
-
-            // Reset state fields to clean state for new Unity process
-            if let Ok(mut test_run_guard) = self.current_test_run_id.lock() {
-                *test_run_guard = None;
-            }
-            if let Ok(mut play_mode_guard) = self.is_in_play_mode.lock() {
-                *play_mode_guard = false;
-            }
-
             // Clean up existing connection if any
             self.cleanup_messaging_client().await;
 
@@ -221,6 +211,18 @@ impl UnityManager {
         }
     }
 
+    /// Reset the editor state to clean state
+    fn reset_editor_state(&mut self) {
+        self.clear_logs();
+            
+        if let Ok(mut test_run_guard) = self.current_test_run_id.lock() {
+            *test_run_guard = None;
+        }
+        if let Ok(mut play_mode_guard) = self.is_in_play_mode.lock() {
+            *play_mode_guard = false;
+        }
+    }
+    
     /// Clean up the messaging client and related resources
     async fn cleanup_messaging_client(&mut self) {
         if let Some(client) = self.messaging_client.take() {
@@ -248,6 +250,7 @@ impl UnityManager {
 
         // Check if Unity process changed
         if current_pid != self.current_unity_pid {
+            self.reset_editor_state();
             if current_pid.is_some() {
                 // Unity started or changed, try to connect
                 match self.try_connect_to_unity().await {
