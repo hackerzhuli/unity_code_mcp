@@ -302,6 +302,8 @@ impl UnityManager {
     pub async fn update_unity_connection(
         &mut self,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        debug_log!("Updating Unity connection status");
+
         // Update process info
         self.project_manager.update_process_info().await?;
         let current_pid = self.project_manager.unity_process_id();
@@ -316,6 +318,7 @@ impl UnityManager {
                 }
             } else {
                 // Unity stopped, clean up
+                debug_log!("Unity Editor is no longer running, cleaning up connection");
                 self.cleanup_messaging_client().await;
                 Ok(false)
             }
