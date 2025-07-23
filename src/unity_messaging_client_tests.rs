@@ -94,9 +94,7 @@ async fn test_unity_messaging_integration() {
 }
 
 #[tokio::test]
-async fn test_tcp_fallback_integration_with_unity() {
-    use std::path::Path;
-    
+async fn test_tcp_fallback_integration_with_unity() {    
     let project_path = get_unity_project_path();
     let mut manager = match UnityProjectManager::new(project_path.to_string_lossy().to_string()).await {
         Ok(manager) => manager,
@@ -372,10 +370,6 @@ async fn test_unity_online_offline_state() {
     // Give the listener task a moment to start up
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    // Note: The listener task sends a ping immediately, so Unity may already be online
-    // We'll test the state transitions instead of the initial state
-    let initial_state = client.is_online();
-
     // Wait for ping response to set Unity online
     let start_time = std::time::Instant::now();
     let mut unity_online = false;
@@ -623,7 +617,7 @@ async fn test_send_message_with_stable_delivery() {
     }
 
     // wait until unity finished compliation
-    for i in 0..100 {
+    for _ in 0..100 {
         if client.is_online() {
             break;
         }

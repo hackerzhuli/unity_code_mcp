@@ -1,5 +1,3 @@
-use std::time::SystemTime;
-
 /// Utility functions for processing Unity log messages
 
 /// Extract the main message from a Unity log, removing stack trace information

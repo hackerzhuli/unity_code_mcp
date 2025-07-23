@@ -1,6 +1,4 @@
-use serde::{Deserialize, Serialize};
-use serde_json;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::broadcast;
@@ -8,7 +6,7 @@ use tokio::time::timeout;
 
 use crate::unity_log_utils;
 use crate::unity_messaging_client::{
-    LogLevel, UnityEvent, UnityMessagingClient, UnityMessagingError,
+    LogLevel, UnityEvent, UnityMessagingClient,
 };
 use crate::unity_project_manager::{UnityProjectError, UnityProjectManager};
 use crate::{debug_log, error_log, info_log, warn_log};
@@ -59,7 +57,7 @@ pub struct RefreshResult {
 }
 
 // Test-related structures are now imported from unity_messaging_client
-use crate::unity_messaging_client::{TestAdaptor, TestResultAdaptor};
+use crate::unity_messaging_client::{TestAdaptor};
 
 /// Test mode for Unity tests
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -337,8 +335,6 @@ impl UnityManager {
                         //println!("[DEBUG] Log collection received event: {:?}", event);
                         match event {
                             UnityEvent::LogMessage { level, message } => {
-                                // Create a unique key for deduplication (message only)
-                                let log_key = message.clone();
                                 let log_entry = UnityLogEntry {
                                     timestamp: SystemTime::now(),
                                     level: level.clone(),
@@ -449,22 +445,6 @@ impl UnityManager {
         self.messaging_client
             .as_ref()
             .map(|client| client.is_online())
-            .unwrap_or(false)
-    }
-
-    /// Check if Unity is currently connected and responsive
-    ///
-    /// # Arguments
-    ///
-    /// * `timeout_seconds` - Maximum age of last response to consider Unity connected (default: 10 seconds)
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if Unity has responded within the timeout period, `false` otherwise
-    pub fn is_unity_connected(&self, timeout_seconds: Option<u64>) -> bool {
-        self.messaging_client
-            .as_ref()
-            .map(|client| client.is_connected(timeout_seconds))
             .unwrap_or(false)
     }
 
@@ -852,7 +832,6 @@ impl UnityManager {
 
             // Track refresh process state
             let mut refresh_response_received = false;
-            let mut refresh_error_message: Option<String> = None;
             let mut compilation_started = false;
             let mut compilation_finished = false;
 
@@ -870,7 +849,6 @@ impl UnityManager {
 
                                 // Check if refresh failed (non-empty message indicates error)
                                 if !message.is_empty() {
-                                    refresh_error_message = Some(message.clone());
                                     error_log!("Refresh failed: {}", message);
 
                                     // Return early with error result

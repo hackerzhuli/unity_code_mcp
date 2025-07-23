@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use tokio::fs as async_fs;
 
@@ -234,29 +234,6 @@ impl UnityProjectManager {
         } else {
             false
         }
-    }
-
-    /// Returns a reference to the project path.
-    ///
-    /// # Returns
-    ///
-    /// Returns a `&Path` reference to the Unity project directory path that was
-    /// provided when creating this `UnityProjectManager` instance.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use unity_code_mcp::UnityProjectManager;
-    ///
-    /// #[tokio::main]
-    /// async fn main() {
-    ///     let project_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("UnityProject");
-    ///     let manager = UnityProjectManager::new(project_path.to_string_lossy().to_string()).await.unwrap();
-    ///     println!("Project path: {}", manager.project_path().display());
-    /// }
-    /// ```
-    pub fn project_path(&self) -> &Path {
-        &self.project_path
     }
 }
 

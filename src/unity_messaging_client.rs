@@ -1,13 +1,11 @@
 use crate::unity_manager::TestFilter;
-use crate::{debug_log, error_log, info_log, warn_log};
+use crate::{debug_log, error_log, info_log};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use thiserror::Error;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream, UdpSocket};
+use tokio::io::{AsyncReadExt};
+use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
@@ -258,8 +256,6 @@ pub enum UnityEvent {
     TestStarted(TestAdaptorContainer),
     /// Test finished with parsed test results
     TestFinished(TestResultAdaptorContainer),
-    /// Test list retrieved (keeping as string for now)
-    TestListRetrieved(String),
     /// Compilation finished
     CompilationFinished,
     /// Compilation started
@@ -290,11 +286,7 @@ pub enum UnityMessagingError {
     #[error("Invalid message: {0}")]
     InvalidMessage(String),
     #[error("Timeout error: {0}")]
-    Timeout(String),
-    #[error("No Unity Editor process is running for this project, make sure you have started Unity Editor")]
-    ProcessNotFound,
-    #[error("Event listener task failed")]
-    TaskFailed,
+    Timeout(String)
 }
 
 /// Unity messaging client that communicates via UDP with event broadcasting
@@ -638,9 +630,6 @@ impl UnityMessagingClient {
                     }
                 }
             }
-            MessageType::TestListRetrieved => {
-                Some(UnityEvent::TestListRetrieved(message.value.clone()))
-            }
 
             // Compilation messages
             MessageType::CompilationFinished => Some(UnityEvent::CompilationFinished),
@@ -786,16 +775,6 @@ impl UnityMessagingClient {
         self.send_message(&project_path_message, None).await
     }
 
-    /// Sends a ping message to Unity
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the ping was sent successfully
-    pub async fn send_ping(&self) -> Result<(), UnityMessagingError> {
-        let ping_message = Message::ping();
-        self.send_message(&ping_message, None).await
-    }
-
     /// Sends a refresh message to Unity to refresh the asset database
     ///
     /// # Returns
@@ -808,23 +787,6 @@ impl UnityMessagingClient {
         let refresh_message = Message::new(MessageType::Refresh, String::new());
         //println!("[DEBUG] Sending refresh message to Unity at {}", self.unity_address);
         self.send_message(&refresh_message, timeout_seconds).await
-    }
-
-    /// Requests the list of available tests for the specified test mode
-    ///
-    /// This method sends a test list request to Unity. The response will be available
-    /// through the event system as a TestListRetrieved event.
-    ///
-    /// # Arguments
-    ///
-    /// * `test_mode` - The test mode ("EditMode" or "PlayMode")
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the request was sent successfully
-    pub async fn retrieve_test_list(&self, test_mode: &str) -> Result<(), UnityMessagingError> {
-        let test_list_message = Message::new(MessageType::RetrieveTestList, test_mode.to_string());
-        self.send_message(&test_list_message, None).await
     }
 
     /// Executes tests based on the specified filter

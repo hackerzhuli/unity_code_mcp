@@ -41,7 +41,7 @@ fn init_file_logging() {
     let log_dir = get_log_directory();
 
     // Create the directory if it doesn't exist
-    if let Err(e) = fs::create_dir_all(&log_dir) {
+    if let Err(_e) = fs::create_dir_all(&log_dir) {
         //eprintln!("Failed to create log directory: {}", e);
         return;
     }
@@ -57,7 +57,7 @@ fn init_file_logging() {
         .open(&log_file)
     {
         Ok(file) => Box::new(file),
-        Err(e) => {
+        Err(_e) => {
             //eprintln!("Failed to open log file {}: {}", log_file.display(), e);
             return;
         }

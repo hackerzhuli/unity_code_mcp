@@ -1,8 +1,7 @@
 use std::time::Duration;
-use std::collections::HashMap;
 use tokio::time::{sleep, timeout};
 
-use crate::test_utils::{cleanup_test_uss_file, create_test_uss_file, get_unity_project_path, create_test_cs_script, cleanup_test_cs_script, create_test_cs_script_with_errors, cleanup_test_cs_script_with_errors};
+use crate::test_utils::{cleanup_test_uss_file, create_test_uss_file, get_unity_project_path, create_test_cs_script_with_errors, cleanup_test_cs_script_with_errors};
 use crate::unity_manager::{TestFilter, TestMode, UnityManager};
 
 /// Expected test result for individual test validation
@@ -316,11 +315,6 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
         Err(e) => {
             println!("⚠ Refresh method failed: {}", e);
             // Don't fail the test if Unity is not available or has issues
-            return;
-        },
-        Err(_) => {
-            println!("⚠ Refresh method timed out");
-            // Don't fail the test if Unity takes too long
             return;
         }
     }
