@@ -19,7 +19,7 @@ namespace TestExecution.Editor
         {
             // a test that will timeout our tool call(for debug builds, but not for release builds)
             Debug.Log("LongTest");
-            Thread.Sleep(10000);
+            Thread.Sleep(35000);
         }
     }
 }
