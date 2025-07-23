@@ -5,9 +5,7 @@ use tokio::sync::broadcast;
 use tokio::time::timeout;
 
 use crate::unity_log_utils::{self, extract_main_message};
-use crate::unity_messaging_client::{
-    UnityMessagingClient,
-};
+use crate::unity_messaging_client::UnityMessagingClient;
 use crate::unity_project_manager::{UnityProjectError, UnityProjectManager};
 use crate::{debug_log, error_log, info_log, warn_log};
 
@@ -214,7 +212,7 @@ impl UnityManager {
     /// Reset the editor state to clean state
     fn reset_editor_state(&mut self) {
         self.clear_logs();
-            
+
         if let Ok(mut test_run_guard) = self.current_test_run_id.lock() {
             *test_run_guard = None;
         }
@@ -222,7 +220,7 @@ impl UnityManager {
             *play_mode_guard = false;
         }
     }
-    
+
     /// Clean up the messaging client and related resources
     async fn cleanup_messaging_client(&mut self) {
         if let Some(client) = self.messaging_client.take() {
@@ -288,22 +286,17 @@ impl UnityManager {
                         //println!("[DEBUG] Log collection received event: {:?}", event);
                         match event {
                             UnityEvent::LogMessage { level, message } => {
-                                let log_entry = UnityLogEntry {
-                                    timestamp: SystemTime::now(),
-                                    level: level.clone(),
-                                    message: message.clone(),
-                                };
+                                // only errors and warnings because we never use info logs anyway
+                                if level == LogLevel::Error || level == LogLevel::Warning {
+                                    let log_entry = UnityLogEntry {
+                                        timestamp: SystemTime::now(),
+                                        level: level.clone(),
+                                        message: message.clone(),
+                                    };
 
-                                debug_log!(
-                                    "Adding log entry: [{:?}] {}",
-                                    log_entry.level,
-                                    log_entry.message
-                                );
-
-                                if let Ok(mut logs_guard) = logs.lock() {
-                                    logs_guard.push(log_entry);
-
-                                    //println!("[DEBUG] Total logs now: {}", logs_guard.len());
+                                    if let Ok(mut logs_guard) = logs.lock() {
+                                        logs_guard.push(log_entry);
+                                    }
                                 }
                             }
                             UnityEvent::CompilationStarted => {
@@ -319,14 +312,14 @@ impl UnityManager {
                                     *timestamp_guard = Some(compilation_time);
                                     debug_log!("Updated last compilation finished timestamp");
                                 }
-                                
+
                                 // Spawn a task to collect compile errors for 1 second
                                 let logs_clone = Arc::clone(&logs);
                                 let compile_errors_clone = Arc::clone(&last_compile_errors);
                                 tokio::spawn(async move {
                                     // Wait for 1 second to collect compile errors
                                     tokio::time::sleep(Duration::from_secs(1)).await;
-                                    
+
                                     // Collect compile errors from the last 1 second using the utility method
                                     let compile_errors = Self::get_recent_logs(
                                         &logs_clone,
@@ -334,11 +327,17 @@ impl UnityManager {
                                         Some(LogLevel::Error),
                                         Some("error CS"),
                                     );
-                                    
+
                                     // Store the collected compile errors
                                     if let Ok(mut errors_guard) = compile_errors_clone.lock() {
-                                        *errors_guard = compile_errors.iter().map(|log| extract_main_message(log.message.as_str())).collect();
-                                        debug_log!("Collected {} compile errors after compilation", errors_guard.len());
+                                        *errors_guard = compile_errors
+                                            .iter()
+                                            .map(|log| extract_main_message(log.message.as_str()))
+                                            .collect();
+                                        debug_log!(
+                                            "Collected {} compile errors after compilation",
+                                            errors_guard.len()
+                                        );
                                     }
                                 });
                             }
@@ -421,15 +420,15 @@ impl UnityManager {
     }
 
     /// Get recent logs with optional filtering
-    /// 
+    ///
     /// Searches logs in reverse order (newest first) and stops when timestamp is before `after_time`.
     /// This is optimized for cases where we typically only need recent logs.
-    /// 
+    ///
     /// # Arguments
     /// * `after_time` - Only return logs with timestamp >= this time
     /// * `level_filter` - Optional log level filter (if None, all levels are included)
     /// * `substring_pattern` - Optional substring that must be present in the message
-    /// 
+    ///
     /// # Returns
     /// Vector of log messages that match the criteria
     fn get_recent_logs(
@@ -439,7 +438,7 @@ impl UnityManager {
         substring_pattern: Option<&str>,
     ) -> Vec<UnityLogEntry> {
         let mut matching_logs = Vec::new();
-        
+
         if let Ok(logs_guard) = logs.lock() {
             // Search in reverse order (newest first) and stop when we hit older timestamps
             for log in logs_guard.iter().rev() {
@@ -447,26 +446,26 @@ impl UnityManager {
                 if log.timestamp < after_time {
                     break;
                 }
-                
+
                 // Apply level filter if specified
                 if let Some(required_level) = &level_filter {
                     if log.level != *required_level {
                         continue;
                     }
                 }
-                
+
                 // Apply substring pattern filter if specified
                 if let Some(pattern) = substring_pattern {
                     if !log.message.contains(pattern) {
                         continue;
                     }
                 }
-                
+
                 // Log matches all criteria, add to results
                 matching_logs.push(log.clone());
             }
         }
-        
+
         // Reverse to get chronological order (oldest first)
         matching_logs.reverse();
         matching_logs
@@ -811,7 +810,7 @@ impl UnityManager {
                         // since this is when a mini time out happened
                         // this is the best time to check whether Unity Editor is still running
                         // to prevent keep waiting for Unity to respond for too long if Unity shuts down unexpectedly
-                        // since we have a very generous timeout for tests 
+                        // since we have a very generous timeout for tests
                         // A long timeout is important because we don't want to limit how long one test can take, one test can take minutes, it depends on the project
                         self.update_unity_connection().await;
                     }
@@ -1055,15 +1054,12 @@ impl UnityManager {
         };
 
         // Get errors and warnings during this refresh (excluding CS warnings because there can be too many) using the utility method
-        let recent_logs = Self::get_recent_logs(
-            &self.logs,
-            refresh_start_time,
-            None,
-            None,
-        );
+        let recent_logs = Self::get_recent_logs(&self.logs, refresh_start_time, None, None);
 
-        for log in recent_logs{
-            if !log.message.contains("warning CS") && (log.level == LogLevel::Error || log.level == LogLevel::Warning) {
+        for log in recent_logs {
+            if !log.message.contains("warning CS")
+                && (log.level == LogLevel::Error || log.level == LogLevel::Warning)
+            {
                 logs.push(extract_main_message(log.message.as_str()));
             }
         }
