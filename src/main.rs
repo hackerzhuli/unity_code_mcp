@@ -53,7 +53,7 @@ impl UnityCodeMcpServer {
     }
 
     /// Initialize the Unity manager and messaging client
-    async fn ensure_unity_manager(&self) -> Result<(), McpError> {
+    pub async fn ensure_unity_manager(&self) -> Result<(), McpError> {
         let mut manager_guard = self.unity_manager.lock().await;
         if manager_guard.is_none() {
             match UnityManager::new(self.project_path.clone()).await {
@@ -223,8 +223,28 @@ async fn main() -> anyhow::Result<()> {
         project_path
     );
 
-    // Create and start the MCP server
+    // Create the MCP server
     let server = UnityCodeMcpServer::new(project_path);
+
+    // Initialize Unity manager once at startup
+    if let Err(e) = server.ensure_unity_manager().await {
+        log::warn!("Initial Unity manager initialization failed: {:?}", e);
+    }
+
+    // Start background Unity connection monitoring
+    let server_clone = server.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+            let mut manager_guard = server_clone.unity_manager.lock().await;
+            if let Some(manager) = manager_guard.as_mut() {
+                if let Err(e) = manager.update_unity_connection().await {
+                    log::debug!("Unity connection update failed: {:?}", e);
+                }
+            }
+        }
+    });
 
     // Start the MCP server
     let service = server.serve(stdio()).await.inspect_err(|e| {
