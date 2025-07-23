@@ -29,9 +29,8 @@ const POST_COMPILATION_WAIT_SECS: u64 = 1;
 
 /// Timeout in seconds for an individual test to complete after it starts
 ///
-/// Note: The timeout is different in debug and release build for easy testing, with a debug build, individual tests should not take longer than 5 seconds.
-/// While in a release build, individual tests can take as long as 180 seconds
-const TEST_TIMEOUT_SECS: u64 = if cfg!(debug_assertions) { 5 } else { 180 };
+/// Note: The timeout is different in debug and release build for easy testing with a debug build
+const TEST_TIMEOUT_SECS: u64 = if cfg!(debug_assertions) { 30 } else { 180 };
 
 /// Timeout in seconds to wait for the next test to start
 const TEST_START_TIMEOUT_SECS: u64 = 3;
