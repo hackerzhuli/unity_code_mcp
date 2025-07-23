@@ -167,47 +167,53 @@ impl UnityManager {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Try to connect to Unity if it's running
         self.try_connect_to_unity().await?;
-        
+
         Ok(())
     }
 
     /// Try to connect to Unity if it's running
-    async fn try_connect_to_unity(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn try_connect_to_unity(
+        &mut self,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Update process info to check if Unity is running
         self.project_manager.update_process_info().await?;
-        
+
         if let Some(unity_pid) = self.project_manager.unity_process_id() {
             // Check if we're already connected to this PID
             if self.current_unity_pid == Some(unity_pid) && self.messaging_client.is_some() {
                 return Ok(()); // Already connected to this Unity instance
             }
-            
+
             self.clear_logs();
 
             // Clean up existing connection if any
             self.cleanup_messaging_client().await;
-            
+
             // Create new connection
             match UnityMessagingClient::new(unity_pid).await {
                 Ok(mut client) => {
                     // Subscribe to events before starting listener
                     let event_receiver = client.subscribe_to_events();
-                    
+
                     // Start listening for Unity events
                     client.start_listening().await?;
                     self.is_listening = true;
-                    
+
                     self.messaging_client = Some(client);
                     self.current_unity_pid = Some(unity_pid);
-                    
+
                     // Start the log collection task with the event receiver
                     self.background_event_handling(event_receiver).await;
-                    
+
                     info_log!("Connected to Unity Editor (PID: {})", unity_pid);
                     Ok(())
                 }
                 Err(e) => {
-                    warn_log!("Failed to connect to Unity Editor (PID: {}): {}", unity_pid, e);
+                    warn_log!(
+                        "Failed to connect to Unity Editor (PID: {}): {}",
+                        unity_pid,
+                        e
+                    );
                     Err(e.into())
                 }
             }
@@ -220,30 +226,32 @@ impl UnityManager {
             Err("Unity Editor is not running".into())
         }
     }
-    
+
     /// Clean up the messaging client and related resources
     async fn cleanup_messaging_client(&mut self) {
         if let Some(client) = self.messaging_client.take() {
             // Stop listening
             self.is_listening = false;
-            
+
             // The client will be dropped here, which should clean up resources
             drop(client);
         }
-        
+
         self.current_unity_pid = None;
         self.event_receiver = None;
-        
+
         debug_log!("Messaging client cleaned up");
     }
-    
+
     /// Check and update Unity connection status
     /// This is important because Unity Editor could shutdown or start after this is initialized
-    pub async fn update_unity_connection(&mut self) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn update_unity_connection(
+        &mut self,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         // Update process info
         self.project_manager.update_process_info().await?;
         let current_pid = self.project_manager.unity_process_id();
-        
+
         // Check if Unity process changed
         if current_pid != self.current_unity_pid {
             if current_pid.is_some() {
@@ -262,7 +270,7 @@ impl UnityManager {
             Ok(self.messaging_client.is_some())
         }
     }
-    
+
     /// Start background event handling logic
     async fn background_event_handling(
         &mut self,
@@ -320,7 +328,9 @@ impl UnityManager {
                             }
                             UnityEvent::CompilationStarted => {
                                 // Clear logs when compilation starts to prevent memory growth
-                                debug_log!("Compilation started - clearing logs to prevent memory growth");
+                                debug_log!(
+                                    "Compilation started - clearing logs to prevent memory growth"
+                                );
                                 if let Ok(mut logs_guard) = logs.lock() {
                                     logs_guard.clear();
                                 }
@@ -584,8 +594,7 @@ impl UnityManager {
                                         adaptor.full_name,
                                         adaptor.test_type
                                     );
-                                    test_id_to_adapter
-                                        .insert(adaptor.id.clone(), adaptor.clone());
+                                    test_id_to_adapter.insert(adaptor.id.clone(), adaptor.clone());
                                 }
                                 debug_log!(
                                     "Total mappings in test_id_to_adapter: {}",
@@ -607,15 +616,17 @@ impl UnityManager {
                                         adaptor.fail_count,
                                         adaptor.result_state
                                     );
-                                    
+
                                     // only add tests that don't have children
                                     if adaptor.has_children {
                                         continue;
                                     }
 
                                     // Create SimpleTestResult from TestResultAdaptor
-                                    if let Some(testAdapter) = test_id_to_adapter.get(&adaptor.test_id){
-                                            let simple_result = SimpleTestResult {
+                                    if let Some(testAdapter) =
+                                        test_id_to_adapter.get(&adaptor.test_id)
+                                    {
+                                        let simple_result = SimpleTestResult {
                                             full_name: testAdapter.full_name.clone(),
                                             error_stack_trace: adaptor.stack_trace.clone(),
                                             passed: adaptor.result_state == "Passed",
@@ -624,7 +635,7 @@ impl UnityManager {
                                             output_logs: adaptor.output.clone(),
                                         };
 
-                                        result.test_results.push(simple_result);        
+                                        result.test_results.push(simple_result);
                                     }
                                 }
                             }
@@ -641,8 +652,10 @@ impl UnityManager {
                                         result.fail_count = adaptor.fail_count;
                                         result.skip_count = adaptor.skip_count;
                                         result.duration_seconds = adaptor.duration;
-                                        result.test_count = adaptor.pass_count + adaptor.fail_count + adaptor.skip_count;
-                                        
+                                        result.test_count = adaptor.pass_count
+                                            + adaptor.fail_count
+                                            + adaptor.skip_count;
+
                                         debug_log!(
                                             "Extracted counts from TestRunFinished: {} passed, {} failed",
                                             adaptor.pass_count,
@@ -776,7 +789,8 @@ impl UnityManager {
 
             // Wait for compilation started event for 1 second
             let compilation_wait_start = std::time::Instant::now();
-            while compilation_wait_start.elapsed() < Duration::from_millis(1000) && !compilation_started
+            while compilation_wait_start.elapsed() < Duration::from_millis(1000)
+                && !compilation_started
             {
                 match timeout(Duration::from_millis(100), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
@@ -845,35 +859,14 @@ impl UnityManager {
                 debug_log!("No compilation started within 5 seconds");
             }
 
-            // Determine the time period for error log collection
-            let mut error_log_time_span = (refresh_start_time, SystemTime::now());
-            if !compilation_started {
-                // If no compilation started, try to include errors from the previous compilation
-                if let Ok(last_compilation_guard) = self.last_compilation_finished.lock() {
-                    if let Some(last_compilation_time) = *last_compilation_guard {
-                        debug_log!("No compilation this refresh, including errors from previous compilation");
-                        // Collect errors from the last compilation plus 2 seconds
-                        error_log_time_span = (last_compilation_time, last_compilation_time + Duration::from_secs(2));
-                    }
-                }
-            };
-
-            // Filter error logs from the existing log collection based on the determined time period
-            let error_logs: Vec<String> = self
-                .get_logs()
-                .into_iter()
-                .filter(|log| {
-                    log.level == LogLevel::Error && 
-                    log.timestamp >= error_log_time_span.0 && 
-                    log.timestamp <= error_log_time_span.1
-                })
-                .map(|log| log.message)
-                .collect();
+            // Filter logs from the existing log collection based on the determined time period
+            let logs: Vec<String> =
+                self.collect_refresh_logs(refresh_start_time, compilation_started);
 
             let duration = operation_start.elapsed().as_secs_f64();
             debug_log!(
                 "Refresh completed, collected {} error logs in {:.2} seconds",
-                error_logs.len(),
+                logs.len(),
                 duration
             );
 
@@ -882,12 +875,65 @@ impl UnityManager {
                 refresh_error_message: None,
                 compilation_started: compilation_started,
                 compilation_completed: compilation_finished,
-                error_logs,
+                error_logs: logs,
                 duration_seconds: duration,
             })
         } else {
             Err("Messaging client not initialized".into())
         }
+    }
+
+    /// Collect relavant logs during refresh and potentially from previous compilation
+    fn collect_refresh_logs(
+        &mut self,
+        refresh_start_time: SystemTime,
+        compilation_started: bool,
+    ) -> Vec<String> {
+        let mut logs: Vec<String> = Vec::new();
+
+        let last_compile_time_option = if !compilation_started {
+            if let Ok(last_compilation_guard) = self.last_compilation_finished.lock() {
+                *last_compilation_guard
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Lock the logs mutex once and work with the data directly
+        if let Ok(logs_guard) = self.logs.lock() {
+            // Get errors and warnings during this refresh
+            let refresh_logs: Vec<String> = logs_guard
+                .iter()
+                .filter(|log| {
+                    (log.level == LogLevel::Error || log.level == LogLevel::Warning)
+                        && log.timestamp >= refresh_start_time
+                        && !log.message.contains("warning CS") // don't collect compile warnings, there can be too many, for other assets, warning can be useful
+                })
+                .map(|log| log.message.clone())
+                .collect();
+            logs.extend(refresh_logs);
+
+            if !compilation_started {
+                // Get previous compile errors (only "error CS" pattern)
+                if let Some(last_compilation_time) = last_compile_time_option {
+                    let previous_compile_errors: Vec<String> = logs_guard
+                        .iter()
+                        .filter(|log| {
+                            log.level == LogLevel::Error
+                                && log.timestamp >= last_compilation_time
+                                && log.timestamp <= last_compilation_time + Duration::from_secs(3)
+                                && log.message.contains("error CS")
+                        })
+                        .map(|log| log.message.clone())
+                        .collect();
+                    logs.extend(previous_compile_errors);
+                }
+            }
+        }
+
+        logs
     }
 
     /// Stop the messaging client and cleanup
@@ -909,7 +955,7 @@ impl Drop for UnityManager {
         if let Some(client) = self.messaging_client.take() {
             drop(client);
         }
-        
+
         self.current_unity_pid = None;
         self.event_receiver = None;
         self.is_listening = false;
