@@ -325,22 +325,13 @@ impl UnityManager {
                                     // Wait for 1 second to collect compile errors
                                     tokio::time::sleep(Duration::from_secs(1)).await;
                                     
-                                    let mut compile_errors = Vec::new();
-                                    if let Ok(logs_guard) = logs_clone.lock() {
-                                        // Collect compile errors from the last 1 second
-                                        let end_time = compilation_time + Duration::from_secs(1);
-                                        let collected_errors: Vec<String> = logs_guard
-                                            .iter()
-                                            .filter(|log| {
-                                                log.level == LogLevel::Error
-                                                    && log.timestamp >= compilation_time
-                                                    && log.timestamp <= end_time
-                                                    && log.message.contains("error CS")
-                                            })
-                                            .map(|log| unity_log_utils::extract_main_message(&log.message))
-                                            .collect();
-                                        compile_errors.extend(collected_errors);
-                                    }
+                                    // Collect compile errors from the last 1 second using the utility method
+                                    let compile_errors = Self::get_recent_logs(
+                                        &logs_clone,
+                                        compilation_time,
+                                        Some(LogLevel::Error),
+                                        Some("error CS"),
+                                    );
                                     
                                     // Store the collected compile errors
                                     if let Ok(mut errors_guard) = compile_errors_clone.lock() {
@@ -418,6 +409,58 @@ impl UnityManager {
         } else {
             0
         }
+    }
+
+    /// Get recent logs with optional filtering
+    /// 
+    /// Searches logs in reverse order (newest first) and stops when timestamp is before `after_time`.
+    /// This is optimized for cases where we typically only need recent logs.
+    /// 
+    /// # Arguments
+    /// * `after_time` - Only return logs with timestamp >= this time
+    /// * `level_filter` - Optional log level filter (if None, all levels are included)
+    /// * `substring_pattern` - Optional substring that must be present in the message
+    /// 
+    /// # Returns
+    /// Vector of log messages (extracted main messages) that match the criteria
+    fn get_recent_logs(
+        logs: &Arc<Mutex<VecDeque<UnityLogEntry>>>,
+        after_time: SystemTime,
+        level_filter: Option<LogLevel>,
+        substring_pattern: Option<&str>,
+    ) -> Vec<String> {
+        let mut matching_logs = Vec::new();
+        
+        if let Ok(logs_guard) = logs.lock() {
+            // Search in reverse order (newest first) and stop when we hit older timestamps
+            for log in logs_guard.iter().rev() {
+                // Stop searching if we've gone too far back in time
+                if log.timestamp < after_time {
+                    break;
+                }
+                
+                // Apply level filter if specified
+                if let Some(required_level) = &level_filter {
+                    if log.level != *required_level {
+                        continue;
+                    }
+                }
+                
+                // Apply substring pattern filter if specified
+                if let Some(pattern) = substring_pattern {
+                    if !log.message.contains(pattern) {
+                        continue;
+                    }
+                }
+                
+                // Log matches all criteria, add to results
+                matching_logs.push(unity_log_utils::extract_main_message(&log.message));
+            }
+        }
+        
+        // Reverse to get chronological order (oldest first)
+        matching_logs.reverse();
+        matching_logs
     }
 
     /// Check if Unity is currently online
@@ -995,27 +1038,34 @@ impl UnityManager {
             None
         };
 
-        // Lock the logs mutex once and work with the data directly
-        if let Ok(logs_guard) = self.logs.lock() {
-            // Get errors and warnings during this refresh
-            let refresh_logs: Vec<String> = logs_guard
-                .iter()
-                .filter(|log| {
-                    (log.level == LogLevel::Error || log.level == LogLevel::Warning)
-                        && log.timestamp >= refresh_start_time
-                        && !log.message.contains("warning CS") // don't collect compile warnings, there can be too many, for other languages, there are less warnings, so they are fine
-                        && (log.message.contains("error") || log.message.contains("warning")) // this is the pattern for language errors and warnings, cs/uss/uxml etc., so we only collect relavant stuff
-                })
-                .map(|log| unity_log_utils::extract_main_message(&log.message))
-                .collect();
-            logs.extend(refresh_logs);
+        // Get errors during this refresh using the utility method
+        let error_logs = Self::get_recent_logs(
+            &self.logs,
+            refresh_start_time,
+            Some(LogLevel::Error),
+            Some("error"),
+        );
+        logs.extend(error_logs);
 
-            if !compilation_started {
-                // Get previous compile errors from stored vector
-                if last_compile_time_option.is_some() {
-                    if let Ok(errors_guard) = self.last_compile_errors.lock() {
-                        logs.extend(errors_guard.clone());
-                    }
+        // Get warnings during this refresh (excluding CS warnings) using the utility method
+        let warning_logs = Self::get_recent_logs(
+            &self.logs,
+            refresh_start_time,
+            Some(LogLevel::Warning),
+            Some("warning"),
+        );
+        // Filter out CS warnings manually since the utility method doesn't support negative patterns
+        let filtered_warnings: Vec<String> = warning_logs
+            .into_iter()
+            .filter(|msg| !msg.contains("warning CS"))
+            .collect();
+        logs.extend(filtered_warnings);
+
+        if !compilation_started {
+            // Get previous compile errors from stored vector
+            if last_compile_time_option.is_some() {
+                if let Ok(errors_guard) = self.last_compile_errors.lock() {
+                    logs.extend(errors_guard.clone());
                 }
             }
         }
