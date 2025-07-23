@@ -1,0 +1,2 @@
+cloc_ext=[".rs"]
+cloc_ignore=["rmcp_examples"]
