@@ -783,7 +783,7 @@ impl UnityManager {
                             root_test_adaptor,
                             test_results,
                             test_states,
-                            "Event channel closed during test execution",
+                            "Event channel closed during test execution. Hint: Unity Editor process shuts down unexpectedly, it could have crashed or been killed by user.",
                         ));
                     }
                     Err(_) => {
