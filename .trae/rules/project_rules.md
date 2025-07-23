@@ -16,12 +16,12 @@ This project aims to create a reliable Model Context Protocol (MCP) server that 
 
 ### Core Technologies
 - **Language**: Rust
-- **MCP Framework**: `rust-mcp-sdk` (core dependency)
-- **Async Runtime**: Tokio (implicit dependency via rust-mcp-sdk)
+- **MCP Framework**: `rmcp` (core dependency)
+- **Async Runtime**: Tokio (implicit dependency via rmcp)
 - **Architecture**: Single-threaded async to minimize complexity
 
 ### Dependencies
-- `rust-mcp-sdk`: Primary MCP implementation
+- `rmcp`: Primary MCP implementation
 - `tokio`: Async I/O runtime
 
 ## Development Guidelines
@@ -50,12 +50,10 @@ This project aims to create a reliable Model Context Protocol (MCP) server that 
 - Maintain clear separation between Unity communication and MCP protocol handling
 
 ### Testing Strategy
-- Unit tests for internal functionality (modules that doesn't require a running Unity Editor instance to test)
+- Unit tests for most functionality
 - A real (but minimal) Unity project is embedded in `UnityProject` for running related tests (that doesn't require a running Unity Editor instance, just need files, including Unity generated files)
-- Manual tests with Unity Editor scenarios
 - Don't create examples binaries(for testing or any other reason), only do unit tests for testing
-- Run test sequentially with `cargo test -- --test-threads=1`, otherwise, Unity Editor related tests can fail.
-- Our tests can take a long time to run(30-60 seconds), so avoid running all tests as much as possible, focus testing individual modules that we're actively working on.
+- Our tests can take a long time to run(30-60 seconds), so avoid running all tests when possible, focus testing individual modules that we're actively working on.
 
 ### Compatibility
 - Target stable Rust versions
@@ -66,13 +64,3 @@ This project aims to create a reliable Model Context Protocol (MCP) server that 
 
 1. **Setup**: Use `cargo` for dependency management and building
 2. **Testing**: Run tests before commits with `cargo test`
-3. **Formatting**: Use `cargo fmt` before commits
-4. **Linting**: Address `cargo clippy` warnings
-5. **Documentation**: Update docs for any API changes
-
-## Integration Notes
-
-- This server will be integrated into the Unity Code Pro VS Code extension
-- Users should be able to configure VS Code (or forks) to use this MCP server
-- Design APIs with VS Code extension consumption in mind
-- Consider configuration and setup simplicity for end users
