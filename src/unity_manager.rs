@@ -13,6 +13,31 @@ use crate::unity_messaging_client::{
 use crate::unity_project_manager::{UnityProjectError, UnityProjectManager};
 use crate::{debug_log, error_log, info_log, warn_log};
 
+// Timing constants for refresh operations
+
+/// Timeout in seconds for sending refresh messages to Unity
+const REFRESH_SEND_TIMEOUT_SECS: u64 = 60;
+
+/// Total timeout in seconds for the refresh operation(after sent, not including compilation)
+const REFRESH_TOTAL_TIMEOUT_SECS: u64 = 60;
+
+/// Timeout in milliseconds to wait for compilation to start after refresh finised
+const COMPILATION_WAIT_TIMEOUT_MILLIS: u64 = 1000;
+
+/// Timeout in seconds for compilation to finish
+const COMPILATION_FINISH_TIMEOUT_SECS: u64 = 60;
+
+/// Wait time in seconds after compilation finishes for error logs to arrive
+const POST_COMPILATION_WAIT_SECS: u64 = 1;
+
+// Timing constants for test execution
+
+/// Total timeout in seconds for test execution to complete
+const TEST_EXECUTION_TIMEOUT_SECS: u64 = 300;
+
+/// Timeout in seconds for receiving individual test events
+const TEST_EVENT_TIMEOUT_SECS: u64 = 10;
+
 /// Result of a refresh operation
 #[derive(Debug, Clone)]
 pub struct RefreshResult {
@@ -565,12 +590,12 @@ impl UnityManager {
             // Temporary mapping from TestId to test full name for building SimpleTestResult
             let mut test_id_to_adapter: HashMap<String, TestAdaptor> = HashMap::new();
 
-            let timeout_duration = Duration::from_secs(300); // 5 minutes for test execution
+            let timeout_duration = Duration::from_secs(TEST_EXECUTION_TIMEOUT_SECS);
             let start_time = std::time::Instant::now();
 
             // Wait for test execution to complete
             while start_time.elapsed() < timeout_duration {
-                match timeout(Duration::from_secs(10), event_receiver.recv()).await {
+                match timeout(Duration::from_secs(TEST_EVENT_TIMEOUT_SECS), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
                         debug_log!("Received event: {:?}", std::mem::discriminant(&event));
                         match event {
@@ -717,9 +742,9 @@ impl UnityManager {
 
             let operation_start = std::time::Instant::now();
 
-            // Send the refresh message, allow 60 seconds to send
+            // Send the refresh message, allow configured timeout to send
             client
-                .send_refresh_message(Some(60))
+                .send_refresh_message(Some(REFRESH_SEND_TIMEOUT_SECS))
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             //println!("[DEBUG] Refresh message sent");
@@ -734,7 +759,7 @@ impl UnityManager {
             let mut compilation_started = false;
             let mut compilation_finished = false;
 
-            let timeout_duration = Duration::from_secs(60); // 1 minute total timeout
+            let timeout_duration = Duration::from_secs(REFRESH_TOTAL_TIMEOUT_SECS);
             let start_time = std::time::Instant::now();
 
             // Wait for refresh response first
@@ -791,10 +816,10 @@ impl UnityManager {
 
             // Wait for compilation started event for 1 second
             let compilation_wait_start = std::time::Instant::now();
-            while compilation_wait_start.elapsed() < Duration::from_millis(1000)
-                && !compilation_started
-            {
-                match timeout(Duration::from_millis(100), event_receiver.recv()).await {
+            while compilation_wait_start.elapsed() < Duration::from_millis(COMPILATION_WAIT_TIMEOUT_MILLIS)
+                    && !compilation_started
+                {
+                    match timeout(Duration::from_millis(100), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
                         match event {
                             UnityEvent::CompilationStarted => {
@@ -818,7 +843,7 @@ impl UnityManager {
             // If compilation started, wait for compilation finished for 60 seconds
             if compilation_started {
                 while start_time.elapsed() < timeout_duration && !compilation_finished {
-                    match timeout(Duration::from_secs(60), event_receiver.recv()).await {
+                    match timeout(Duration::from_secs(COMPILATION_FINISH_TIMEOUT_SECS), event_receiver.recv()).await {
                         Ok(Ok(event)) => {
                             match event {
                                 UnityEvent::CompilationFinished => {
@@ -844,8 +869,7 @@ impl UnityManager {
                     return Ok(RefreshResult {
                         refresh_completed: false,
                         refresh_error_message: Some(
-                            "Timeout waiting for compilation to finish after 60 seconds"
-                                .to_string(),
+                            format!("Timeout waiting for compilation to finish after {} seconds", COMPILATION_FINISH_TIMEOUT_SECS),
                         ),
                         compilation_started: true,
                         compilation_completed: false,
@@ -855,10 +879,10 @@ impl UnityManager {
                 }
 
                 // Wait additional time for error logs to arrive after compilation finishes
-                debug_log!("Waiting 2 seconds for error logs after compilation finished");
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                debug_log!("Waiting {} second(s) for error logs after compilation finished", POST_COMPILATION_WAIT_SECS);
+                tokio::time::sleep(Duration::from_secs(POST_COMPILATION_WAIT_SECS)).await;
             } else {
-                debug_log!("No compilation started within 5 seconds");
+                debug_log!("No compilation started within {} millisecond(s)", COMPILATION_WAIT_TIMEOUT_MILLIS);
             }
 
             // Filter logs from the existing log collection based on the determined time period

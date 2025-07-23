@@ -1,3 +1,5 @@
 .a{
-    back: 10px;  
-}  
+    back: 10px;       
+    background-image: 10px;
+    background-color: 10px; 
+}                    

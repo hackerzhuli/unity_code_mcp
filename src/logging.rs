@@ -64,9 +64,17 @@ fn init_file_logging() {
     };
 
     let mut builder = Builder::from_default_env();
+    
+    // Use Debug level in debug builds, Info level in release builds
+    let log_level = if cfg!(debug_assertions) {
+        LevelFilter::Debug
+    } else {
+        LevelFilter::Info
+    };
+    
     builder
         .target(Target::Pipe(target))
-        .filter_level(LevelFilter::Info)
+        .filter_level(log_level)
         .format(|buf, record| {
             writeln!(
                 buf,
