@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::broadcast;
 use tokio::time::timeout;
 
+use crate::unity_log_utils;
 use crate::unity_messaging_client::{
     LogLevel, UnityEvent, UnityMessagingClient, UnityMessagingError,
 };
@@ -912,7 +913,7 @@ impl UnityManager {
                         && !log.message.contains("warning CS") // don't collect compile warnings, there can be too many, for other languages, there are less warnings, so they are fine
                         && (log.message.contains("error") || log.message.contains("warning")) // this is the pattern for language errors and warnings, cs/uss/uxml etc., so we only collect relavant stuff
                 })
-                .map(|log| log.message.clone())
+                .map(|log| unity_log_utils::extract_main_message(&log.message))
                 .collect();
             logs.extend(refresh_logs);
 
@@ -927,7 +928,7 @@ impl UnityManager {
                                 && log.timestamp <= last_compilation_time + Duration::from_secs(3)
                                 && log.message.contains("error CS")
                         })
-                        .map(|log| log.message.clone())
+                        .map(|log| unity_log_utils::extract_main_message(&log.message))
                         .collect();
                     logs.extend(previous_compile_errors);
                 }

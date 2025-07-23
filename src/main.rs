@@ -3,6 +3,7 @@
 #![allow(warnings)]
 mod logging;
 mod test_utils;
+mod unity_log_utils;
 mod unity_manager;
 mod unity_manager_tests;
 mod unity_messaging_client;
