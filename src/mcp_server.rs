@@ -163,12 +163,13 @@ impl UnityCodeMcpServer {
                 let response = json!({
                     "test_run_completed": result.execution_completed,
                     "test_run_error_message": result.error_message,
-                    "pass_count": result.pass_count,
-                    "fail_count": result.fail_count,
-                    "skip_count": result.skip_count,
-                    "test_count": result.test_count,
+                    "passed_test_count": result.pass_count,
+                    "failed_test_count": result.fail_count,
+                    "skipped_test_count": result.skip_count,
+                    "total_test_count": result.test_count,
                     "duration_seconds": result.duration_seconds,
-                    "test_results": result.test_results.iter().map(|test| {
+                    // AI agent only need to care about failed tests, so we filter out passed tests(there can be hundreds of tests, so filter make sense)
+                    "failed_tests": result.test_results.iter().filter(|test| !test.passed).map(|test| {
                         let combined_error = if test.error_message.is_empty() && test.error_stack_trace.is_empty() {
                             String::new()
                         } else if test.error_message.is_empty() {
@@ -181,7 +182,6 @@ impl UnityCodeMcpServer {
                         
                         json!({
                             "full_name": test.full_name,
-                            "passed": test.passed,
                             "duration_seconds": test.duration_seconds,
                             "error_message": combined_error,
                             "logs": test.output_logs.trim_end()
