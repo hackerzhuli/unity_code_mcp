@@ -30,7 +30,7 @@ const POST_COMPILATION_WAIT_SECS: u64 = 1;
 // Timing constants for test execution
 
 /// Timeout in seconds for an individual test to complete after it starts
-/// 
+///
 /// Note: The timeout is different in debug and release build for easy testing, with a debug build, individual tests should not take longer than 5 seconds.
 /// While in a release build, individual tests can take as long as 180 seconds
 const TEST_TIMEOUT_SECS: u64 = if cfg!(debug_assertions) { 5 } else { 180 };
@@ -101,7 +101,7 @@ pub enum TestFilter {
 struct TestState {
     start_time: std::time::Instant,
     finish_time: Option<std::time::Instant>,
-    adapater: TestAdaptor
+    adapater: TestAdaptor,
 }
 
 impl TestFilter {
@@ -174,9 +174,6 @@ pub struct UnityManager {
     messaging_client: Option<UnityMessagingClient>,
     project_manager: UnityProjectManager,
     logs: Arc<Mutex<VecDeque<UnityLogEntry>>>,
-    seen_logs: Arc<Mutex<HashSet<String>>>,
-    max_logs: usize,
-    is_listening: bool,
     current_unity_pid: Option<u32>,
     /// Time of the last compilation finish
     last_compilation_finished: Arc<Mutex<Option<SystemTime>>>,
@@ -197,9 +194,6 @@ impl UnityManager {
             messaging_client: None,
             project_manager,
             logs: Arc::new(Mutex::new(VecDeque::new())),
-            seen_logs: Arc::new(Mutex::new(HashSet::new())),
-            max_logs: 1000, // Keep last 1000 log entries
-            is_listening: false,
             current_unity_pid: None,
             last_compilation_finished: Arc::new(Mutex::new(None)),
             current_test_run_id: Arc::new(Mutex::new(None)),
@@ -251,7 +245,6 @@ impl UnityManager {
 
                     // Start listening for Unity events
                     client.start_listening().await?;
-                    self.is_listening = true;
 
                     self.messaging_client = Some(client);
                     self.current_unity_pid = Some(unity_pid);
@@ -284,9 +277,6 @@ impl UnityManager {
     /// Clean up the messaging client and related resources
     async fn cleanup_messaging_client(&mut self) {
         if let Some(client) = self.messaging_client.take() {
-            // Stop listening
-            self.is_listening = false;
-
             // The client will be dropped here, which should clean up resources
             drop(client);
         }
@@ -306,7 +296,7 @@ impl UnityManager {
         // Update process info
         // ignore error here, we just want to extract process id later
         // it will error if unity editor is not running
-        let _ = self.project_manager.update_process_info().await; 
+        let _ = self.project_manager.update_process_info().await;
         let current_pid = self.project_manager.unity_process_id();
 
         // Check if Unity process changed
@@ -335,11 +325,9 @@ impl UnityManager {
         mut event_receiver: broadcast::Receiver<UnityEvent>,
     ) {
         let logs = Arc::clone(&self.logs);
-        let seen_logs = Arc::clone(&self.seen_logs);
         let last_compilation_finished = Arc::clone(&self.last_compilation_finished);
         let current_test_run_id = Arc::clone(&self.current_test_run_id);
         let is_in_play_mode = Arc::clone(&self.is_in_play_mode);
-        let max_logs = self.max_logs;
 
         tokio::spawn(async move {
             //println!("[DEBUG] Log collection task started");
@@ -351,39 +339,22 @@ impl UnityManager {
                             UnityEvent::LogMessage { level, message } => {
                                 // Create a unique key for deduplication (message only)
                                 let log_key = message.clone();
-
-                                // Check if we've already seen this exact log
-                                let is_duplicate = if let Ok(mut seen_guard) = seen_logs.lock() {
-                                    !seen_guard.insert(log_key)
-                                } else {
-                                    false
+                                let log_entry = UnityLogEntry {
+                                    timestamp: SystemTime::now(),
+                                    level: level.clone(),
+                                    message: message.clone(),
                                 };
 
-                                if !is_duplicate {
-                                    let log_entry = UnityLogEntry {
-                                        timestamp: SystemTime::now(),
-                                        level: level.clone(),
-                                        message: message.clone(),
-                                    };
+                                debug_log!(
+                                    "Adding log entry: [{:?}] {}",
+                                    log_entry.level,
+                                    log_entry.message
+                                );
 
-                                    debug_log!(
-                                        "Adding log entry: [{:?}] {}",
-                                        log_entry.level,
-                                        log_entry.message
-                                    );
+                                if let Ok(mut logs_guard) = logs.lock() {
+                                    logs_guard.push_back(log_entry);
 
-                                    if let Ok(mut logs_guard) = logs.lock() {
-                                        logs_guard.push_back(log_entry);
-
-                                        // Keep only the last max_logs entries
-                                        while logs_guard.len() > max_logs {
-                                            logs_guard.pop_front();
-                                        }
-
-                                        //println!("[DEBUG] Total logs now: {}", logs_guard.len());
-                                    }
-                                } else {
-                                    //println!("[DEBUG] Skipping duplicate log: [{:?}] {}", level, message);
+                                    //println!("[DEBUG] Total logs now: {}", logs_guard.len());
                                 }
                             }
                             UnityEvent::CompilationStarted => {
@@ -393,9 +364,6 @@ impl UnityManager {
                                 );
                                 if let Ok(mut logs_guard) = logs.lock() {
                                     logs_guard.clear();
-                                }
-                                if let Ok(mut seen_guard) = seen_logs.lock() {
-                                    seen_guard.clear();
                                 }
                             }
                             UnityEvent::CompilationFinished => {
@@ -410,7 +378,10 @@ impl UnityManager {
                                 if let Some(first_adaptor) = container.test_adaptors.first() {
                                     if let Ok(mut test_run_guard) = current_test_run_id.lock() {
                                         *test_run_guard = Some(first_adaptor.id.clone());
-                                        debug_log!("Test run started with root ID: {}", first_adaptor.id);
+                                        debug_log!(
+                                            "Test run started with root ID: {}",
+                                            first_adaptor.id
+                                        );
                                     }
                                 }
                             }
@@ -426,7 +397,10 @@ impl UnityManager {
                                 // Track Unity's play mode state
                                 if let Ok(mut play_mode_guard) = is_in_play_mode.lock() {
                                     *play_mode_guard = playing;
-                                    debug_log!("Unity play mode changed: {}", if playing { "Playing" } else { "Stopped" });
+                                    debug_log!(
+                                        "Unity play mode changed: {}",
+                                        if playing { "Playing" } else { "Stopped" }
+                                    );
                                 }
                             }
                             _ => {}
@@ -458,9 +432,6 @@ impl UnityManager {
     pub fn clear_logs(&self) {
         if let Ok(mut logs_guard) = self.logs.lock() {
             logs_guard.clear();
-        }
-        if let Ok(mut seen_guard) = self.seen_logs.lock() {
-            seen_guard.clear();
         }
     }
 
@@ -680,7 +651,7 @@ impl UnityManager {
 
             let mut run_start_time: Option<Instant> = None;
 
-            let mut root_test_adaptor : Option<TestAdaptor> = None;
+            let mut root_test_adaptor: Option<TestAdaptor> = None;
 
             // Wait for test execution to complete
             loop {
@@ -711,11 +682,14 @@ impl UnityManager {
                                         adaptor.full_name,
                                         adaptor.test_type
                                     );
-                                    test_states.insert(adaptor.id.clone(), TestState {
-                                        start_time: std::time::Instant::now(),
-                                        finish_time: None,
-                                        adapater: adaptor.clone(),
-                                    });
+                                    test_states.insert(
+                                        adaptor.id.clone(),
+                                        TestState {
+                                            start_time: std::time::Instant::now(),
+                                            finish_time: None,
+                                            adapater: adaptor.clone(),
+                                        },
+                                    );
                                 }
                             }
                             UnityEvent::TestFinished(container) => {
@@ -733,9 +707,10 @@ impl UnityManager {
                                         adaptor.fail_count,
                                         adaptor.result_state
                                     );
-                                    
+
                                     // record finish time
-                                    if let Some(test_state) = test_states.get_mut(&adaptor.test_id) {
+                                    if let Some(test_state) = test_states.get_mut(&adaptor.test_id)
+                                    {
                                         test_state.finish_time = Some(std::time::Instant::now());
                                     }
 
@@ -745,9 +720,7 @@ impl UnityManager {
                                     }
 
                                     // Create SimpleTestResult from TestResultAdaptor
-                                    if let Some(test_state) =
-                                        test_states.get(&adaptor.test_id)
-                                    {
+                                    if let Some(test_state) = test_states.get(&adaptor.test_id) {
                                         let simple_result = SimpleTestResult {
                                             full_name: test_state.adapater.full_name.clone(),
                                             error_stack_trace: adaptor.stack_trace.clone(),
@@ -797,25 +770,42 @@ impl UnityManager {
                         }
                     }
                     Ok(Err(_)) => {
-                        return Ok(self.create_test_result_with_error(root_test_adaptor, test_results, test_states, "Event channel closed during test execution"));
+                        return Ok(self.create_test_result_with_error(
+                            root_test_adaptor,
+                            test_results,
+                            test_states,
+                            "Event channel closed during test execution",
+                        ));
                     }
                     Err(_) => {
-                        if run_start_time.is_none() && execute_test_message_sent_time.elapsed() >= Duration::from_secs(TEST_RUN_START_TIMEOUT_SECS) {
+                        if run_start_time.is_none()
+                            && execute_test_message_sent_time.elapsed()
+                                >= Duration::from_secs(TEST_RUN_START_TIMEOUT_SECS)
+                        {
                             return Err(format!("Test run didn't start within {} seconds. Hint: Unity Editor is busy and can't respond now, please try again later.", TEST_RUN_START_TIMEOUT_SECS).into());
                         }
 
                         // check for time out in tests
                         if let Err(e) = self.check_test_timeout(&mut test_states, run_start_time) {
                             // Return results with error message instead of just error
-                            return Ok(self.create_test_result_with_error(root_test_adaptor, test_results, test_states, e.as_str()));
-
+                            return Ok(self.create_test_result_with_error(
+                                root_test_adaptor,
+                                test_results,
+                                test_states,
+                                e.as_str(),
+                            ));
                         }
                     }
                 }
             }
 
             // this should not occur
-            Ok(self.create_test_result_with_error(root_test_adaptor, test_results, test_states, "Some internal error occured during test execution"))
+            Ok(self.create_test_result_with_error(
+                root_test_adaptor,
+                test_results,
+                test_states,
+                "Some internal error occured during test execution",
+            ))
         } else {
             Err(MESSAGING_CLIENT_NOT_INIT_ERROR.into())
         }
@@ -923,10 +913,11 @@ impl UnityManager {
 
             // Wait for compilation started event for 1 second
             let compilation_wait_start = std::time::Instant::now();
-            while compilation_wait_start.elapsed() < Duration::from_millis(COMPILATION_WAIT_TIMEOUT_MILLIS)
-                    && !compilation_started
-                {
-                    match timeout(Duration::from_millis(100), event_receiver.recv()).await {
+            while compilation_wait_start.elapsed()
+                < Duration::from_millis(COMPILATION_WAIT_TIMEOUT_MILLIS)
+                && !compilation_started
+            {
+                match timeout(Duration::from_millis(100), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
                         match event {
                             UnityEvent::CompilationStarted => {
@@ -950,7 +941,12 @@ impl UnityManager {
             // If compilation started, wait for compilation finished for 60 seconds
             if compilation_started {
                 while start_time.elapsed() < timeout_duration && !compilation_finished {
-                    match timeout(Duration::from_secs(COMPILATION_FINISH_TIMEOUT_SECS), event_receiver.recv()).await {
+                    match timeout(
+                        Duration::from_secs(COMPILATION_FINISH_TIMEOUT_SECS),
+                        event_receiver.recv(),
+                    )
+                    .await
+                    {
                         Ok(Ok(event)) => {
                             match event {
                                 UnityEvent::CompilationFinished => {
@@ -975,9 +971,10 @@ impl UnityManager {
                     let duration = operation_start.elapsed().as_secs_f64();
                     return Ok(RefreshResult {
                         refresh_completed: false,
-                        refresh_error_message: Some(
-                            format!("Timeout waiting for compilation to finish after {} seconds", COMPILATION_FINISH_TIMEOUT_SECS),
-                        ),
+                        refresh_error_message: Some(format!(
+                            "Timeout waiting for compilation to finish after {} seconds",
+                            COMPILATION_FINISH_TIMEOUT_SECS
+                        )),
                         compilation_started: true,
                         compilation_completed: false,
                         problems: Vec::new(),
@@ -986,10 +983,16 @@ impl UnityManager {
                 }
 
                 // Wait additional time for error logs to arrive after compilation finishes
-                debug_log!("Waiting {} second(s) for error logs after compilation finished", POST_COMPILATION_WAIT_SECS);
+                debug_log!(
+                    "Waiting {} second(s) for error logs after compilation finished",
+                    POST_COMPILATION_WAIT_SECS
+                );
                 tokio::time::sleep(Duration::from_secs(POST_COMPILATION_WAIT_SECS)).await;
             } else {
-                debug_log!("No compilation started within {} millisecond(s)", COMPILATION_WAIT_TIMEOUT_MILLIS);
+                debug_log!(
+                    "No compilation started within {} millisecond(s)",
+                    COMPILATION_WAIT_TIMEOUT_MILLIS
+                );
             }
 
             // Filter logs from the existing log collection based on the determined time period
@@ -1081,11 +1084,15 @@ impl UnityManager {
         // Add a small delay to ensure Unity has time to fully shut down
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    
+
     /// Check for any test timeout, including test finish timeout and also next test start timeout
-    fn check_test_timeout(&self, test_states: &mut HashMap<String, TestState>, run_start_time:Option<Instant>) -> Result<(), String> {
+    fn check_test_timeout(
+        &self,
+        test_states: &mut HashMap<String, TestState>,
+        run_start_time: Option<Instant>,
+    ) -> Result<(), String> {
         let mut is_running_leaf_test = false;
-        let mut last_test_finish_time:Option<Instant> = None;
+        let mut last_test_finish_time: Option<Instant> = None;
         for test_state in test_states.values_mut() {
             // test finished
             if let Some(finish_time) = test_state.finish_time {
@@ -1094,9 +1101,14 @@ impl UnityManager {
                 }
             }
             // test is running
-            else{
-                if !test_state.adapater.has_children && test_state.start_time.elapsed() > Duration::from_secs(TEST_TIMEOUT_SECS) {
-                    return Err(format!("Test timeout waiting for test {} to finish, after {} seconds", test_state.adapater.full_name, TEST_TIMEOUT_SECS));
+            else {
+                if !test_state.adapater.has_children
+                    && test_state.start_time.elapsed() > Duration::from_secs(TEST_TIMEOUT_SECS)
+                {
+                    return Err(format!(
+                        "Test timeout waiting for test {} to finish, after {} seconds",
+                        test_state.adapater.full_name, TEST_TIMEOUT_SECS
+                    ));
                 }
 
                 if !test_state.adapater.has_children {
@@ -1106,26 +1118,43 @@ impl UnityManager {
         }
 
         if !is_running_leaf_test {
-            if last_test_finish_time.is_some() && last_test_finish_time.unwrap().elapsed() > Duration::from_secs(TEST_START_TIMEOUT_SECS) {
-                return Err(format!("Test timeout waiting for the next test to start, after {} seconds", TEST_START_TIMEOUT_SECS));
-            }
-            else if last_test_finish_time.is_none() && run_start_time.is_some() && run_start_time.unwrap().elapsed() > Duration::from_secs(TEST_START_TIMEOUT_SECS) {
-                return Err(format!("Test timeout waiting for the first test to start, after {} seconds", TEST_START_TIMEOUT_SECS));
+            if last_test_finish_time.is_some()
+                && last_test_finish_time.unwrap().elapsed()
+                    > Duration::from_secs(TEST_START_TIMEOUT_SECS)
+            {
+                return Err(format!(
+                    "Test timeout waiting for the next test to start, after {} seconds",
+                    TEST_START_TIMEOUT_SECS
+                ));
+            } else if last_test_finish_time.is_none()
+                && run_start_time.is_some()
+                && run_start_time.unwrap().elapsed() > Duration::from_secs(TEST_START_TIMEOUT_SECS)
+            {
+                return Err(format!(
+                    "Test timeout waiting for the first test to start, after {} seconds",
+                    TEST_START_TIMEOUT_SECS
+                ));
             }
         }
 
         Ok(())
     }
-    
+
     /// Create test result with error
-    fn create_test_result_with_error(&self, root_test_adaptor: Option<TestAdaptor>, test_results: Vec<SimpleTestResult>, test_states: HashMap<String, TestState>, error_message: &str) -> TestExecutionResult {
+    fn create_test_result_with_error(
+        &self,
+        root_test_adaptor: Option<TestAdaptor>,
+        test_results: Vec<SimpleTestResult>,
+        test_states: HashMap<String, TestState>,
+        error_message: &str,
+    ) -> TestExecutionResult {
         // let's count the tests
         let mut pass_count = 0;
         let mut fail_count = 0;
         for test_result in test_results.iter() {
             if test_result.passed {
                 pass_count += 1;
-            }else{
+            } else {
                 fail_count += 1;
             }
         }
@@ -1143,9 +1172,11 @@ impl UnityManager {
         }
 
         // let's estimate duration by finding the first test start time
-        let mut first_test_start_time:Option<Instant> = None;
+        let mut first_test_start_time: Option<Instant> = None;
         for test_state in test_states.values() {
-            if first_test_start_time.is_none() || first_test_start_time.unwrap() > test_state.start_time {
+            if first_test_start_time.is_none()
+                || first_test_start_time.unwrap() > test_state.start_time
+            {
                 first_test_start_time = Some(test_state.start_time);
             }
         }
@@ -1176,6 +1207,5 @@ impl Drop for UnityManager {
         }
 
         self.current_unity_pid = None;
-        self.is_listening = false;
     }
 }
