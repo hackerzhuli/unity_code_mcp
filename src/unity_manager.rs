@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::broadcast;
 use tokio::time::timeout;
 
@@ -15,8 +15,8 @@ use crate::{debug_log, error_log, info_log, warn_log};
 
 // Timing constants for refresh operations
 
-/// Timeout in seconds for sending refresh messages to Unity
-const REFRESH_SEND_TIMEOUT_SECS: u64 = 60;
+/// Timeout in seconds for sending messages to Unity (e.g. wait until unity finish compilation or importing assets)
+const SEND_MESSAGE_TIMEOUT_SECS: u64 = 60;
 
 /// Total timeout in seconds for the refresh operation(after sent, not including compilation)
 const REFRESH_TOTAL_TIMEOUT_SECS: u64 = 60;
@@ -27,16 +27,22 @@ const COMPILATION_WAIT_TIMEOUT_MILLIS: u64 = 1000;
 /// Timeout in seconds for compilation to finish
 const COMPILATION_FINISH_TIMEOUT_SECS: u64 = 60;
 
-/// Wait time in seconds after compilation finishes for error logs to arrive
+/// Wait time in seconds after compilation finishes for logs to arrive
 const POST_COMPILATION_WAIT_SECS: u64 = 1;
 
 // Timing constants for test execution
 
-/// Total timeout in seconds for test execution to complete
-const TEST_EXECUTION_TIMEOUT_SECS: u64 = 300;
+/// Timeout in seconds for an individual test to complete after it starts
+/// 
+/// Note: The timeout is different in debug and release build for easy testing, with a debug build, individual tests should not take longer than 5 seconds.
+/// While in a release build, individual tests can take as long as 120 seconds
+const TEST_TIMEOUT_SECS: u64 = if cfg!(debug_assertions) { 5 } else { 120 };
 
-/// Timeout in seconds for receiving individual test events
-const TEST_EVENT_TIMEOUT_SECS: u64 = 10;
+/// Timeout in seconds to wait for the next test to start
+const TEST_START_TIMEOUT_SECS: u64 = 3;
+
+/// Timeout in seconds to wait for TestRunStarted event
+const TEST_RUN_START_TIMEOUT_SECS: u64 = 5;
 
 /// Result of a refresh operation
 #[derive(Debug, Clone)]
@@ -91,6 +97,14 @@ pub enum TestFilter {
     Specific { mode: TestMode, test_name: String },
     /// Execute tests matching a custom filter string
     Custom { mode: TestMode, filter: String },
+}
+
+/// tracking running state of individual tests
+#[derive(Debug, Clone)]
+struct TestState {
+    start_time: std::time::Instant,
+    finish_time: Option<std::time::Instant>,
+    adapater: TestAdaptor
 }
 
 impl TestFilter {
@@ -148,6 +162,8 @@ pub struct TestExecutionResult {
     pub test_count: u32,
     /// Total number of tests that skipped
     pub skip_count: u32,
+    /// Additional error message, empty if no additional error occurred
+    pub error_message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -541,7 +557,7 @@ impl UnityManager {
     pub async fn refresh_unity(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(client) = &mut self.messaging_client {
             client
-                .send_refresh_message(Some(60))
+                .send_refresh_message(Some(SEND_MESSAGE_TIMEOUT_SECS))
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         } else {
@@ -571,31 +587,24 @@ impl UnityManager {
                 "Sending test filter to Unity: '{}'",
                 filter.to_filter_string()
             );
+
             client
-                .execute_tests(filter)
+                .execute_tests(filter, Some(SEND_MESSAGE_TIMEOUT_SECS))
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
-            // Collect test execution events
-            let mut result = TestExecutionResult {
-                test_results: Vec::new(),
-                execution_completed: false,
-                pass_count: 0,
-                fail_count: 0,
-                duration_seconds: 0.0,
-                test_count: 0,
-                skip_count: 0,
-            };
+            let execute_test_message_sent_time = Instant::now();
 
             // Temporary mapping from TestId to test full name for building SimpleTestResult
-            let mut test_id_to_adapter: HashMap<String, TestAdaptor> = HashMap::new();
+            let mut test_states: HashMap<String, TestState> = HashMap::new();
 
-            let timeout_duration = Duration::from_secs(TEST_EXECUTION_TIMEOUT_SECS);
-            let start_time = std::time::Instant::now();
+            let mut test_results: Vec<SimpleTestResult> = Vec::new();
+
+            let mut run_start_time: Option<Instant> = None;
 
             // Wait for test execution to complete
-            while start_time.elapsed() < timeout_duration {
-                match timeout(Duration::from_secs(TEST_EVENT_TIMEOUT_SECS), event_receiver.recv()).await {
+            loop {
+                match timeout(Duration::from_secs(3), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
                         debug_log!("Received event: {:?}", std::mem::discriminant(&event));
                         match event {
@@ -604,6 +613,7 @@ impl UnityManager {
                                     "Test run started with {} test adaptors",
                                     container.test_adaptors.len()
                                 );
+                                run_start_time = Some(Instant::now());
                             }
                             UnityEvent::TestStarted(container) => {
                                 debug_log!(
@@ -620,12 +630,12 @@ impl UnityManager {
                                         adaptor.full_name,
                                         adaptor.test_type
                                     );
-                                    test_id_to_adapter.insert(adaptor.id.clone(), adaptor.clone());
+                                    test_states.insert(adaptor.id.clone(), TestState {
+                                        start_time: std::time::Instant::now(),
+                                        finish_time: None,
+                                        adapater: adaptor.clone(),
+                                    });
                                 }
-                                debug_log!(
-                                    "Total mappings in test_id_to_adapter: {}",
-                                    test_id_to_adapter.len()
-                                );
                             }
                             UnityEvent::TestFinished(container) => {
                                 debug_log!(
@@ -642,6 +652,11 @@ impl UnityManager {
                                         adaptor.fail_count,
                                         adaptor.result_state
                                     );
+                                    
+                                    // record finish time
+                                    if let Some(test_state) = test_states.get_mut(&adaptor.test_id) {
+                                        test_state.finish_time = Some(std::time::Instant::now());
+                                    }
 
                                     // only add tests that don't have children
                                     if adaptor.has_children {
@@ -649,11 +664,11 @@ impl UnityManager {
                                     }
 
                                     // Create SimpleTestResult from TestResultAdaptor
-                                    if let Some(testAdapter) =
-                                        test_id_to_adapter.get(&adaptor.test_id)
+                                    if let Some(test_state) =
+                                        test_states.get(&adaptor.test_id)
                                     {
                                         let simple_result = SimpleTestResult {
-                                            full_name: testAdapter.full_name.clone(),
+                                            full_name: test_state.adapater.full_name.clone(),
                                             error_stack_trace: adaptor.stack_trace.clone(),
                                             passed: adaptor.result_state == "Passed",
                                             duration_seconds: adaptor.duration,
@@ -661,40 +676,39 @@ impl UnityManager {
                                             output_logs: adaptor.output.clone(),
                                         };
 
-                                        result.test_results.push(simple_result);
+                                        test_results.push(simple_result);
                                     }
                                 }
                             }
                             UnityEvent::TestRunFinished(container) => {
                                 debug_log!("Test run finished");
 
-                                // Only process the first TestRunFinished event to avoid accumulation
-                                if !result.execution_completed {
-                                    result.execution_completed = true;
-
-                                    // Extract pass/fail counts from parsed data
-                                    if let Some(adaptor) = container.test_result_adaptors.first() {
-                                        result.pass_count = adaptor.pass_count;
-                                        result.fail_count = adaptor.fail_count;
-                                        result.skip_count = adaptor.skip_count;
-                                        result.duration_seconds = adaptor.duration;
-                                        result.test_count = adaptor.pass_count
+                                // Extract pass/fail counts from parsed data
+                                if let Some(adaptor) = container.test_result_adaptors.first() {
+                                    let result = TestExecutionResult {
+                                        pass_count: adaptor.pass_count,
+                                        fail_count: adaptor.fail_count,
+                                        skip_count: adaptor.skip_count,
+                                        duration_seconds: adaptor.duration,
+                                        test_count: adaptor.pass_count
                                             + adaptor.fail_count
-                                            + adaptor.skip_count;
+                                            + adaptor.skip_count,
+                                        test_results,
+                                        execution_completed: true,
+                                        error_message: "".into(),
+                                    };
 
-                                        debug_log!(
-                                            "Extracted counts from TestRunFinished: {} passed, {} failed",
-                                            adaptor.pass_count,
-                                            adaptor.fail_count
-                                        );
-                                    } else {
-                                        debug_log!("No test result adaptors in TestRunFinished");
-                                    }
+                                    debug_log!(
+                                        "Extracted counts from TestRunFinished: {} passed, {} failed",
+                                        adaptor.pass_count,
+                                        adaptor.fail_count
+                                    );
+
+                                    return Ok(result);
+                                } else {
+                                    debug_log!("No test result adaptors in TestRunFinished");
                                 }
                                 break;
-                            }
-                            UnityEvent::TestListRetrieved(_test_list) => {
-                                // Test list is no longer stored in TestExecutionResult
                             }
                             _ => {
                                 // Ignore other events during test execution
@@ -702,25 +716,26 @@ impl UnityManager {
                         }
                     }
                     Ok(Err(_)) => {
-                        return Err("Event channel closed during test execution".into());
+                        return Ok(self.create_test_result_with_error(test_results, test_states, "Event channel closed during test execution"));
                     }
                     Err(_) => {
-                        // Timeout on individual event - check if we should continue waiting
-                        if result.execution_completed {
-                            break;
+                        if run_start_time.is_none() && execute_test_message_sent_time.elapsed() >= Duration::from_secs(TEST_RUN_START_TIMEOUT_SECS) {
+                            return Err(format!("Test run didn't start within {} seconds", TEST_RUN_START_TIMEOUT_SECS).into());
                         }
-                        // Continue waiting if tests are still running
+
+                        // check for time out in tests
+                        if let Err(e) = self.check_test_timeout(&mut test_states, run_start_time) {
+                            // Return results with error message instead of just error
+                            return Ok(self.create_test_result_with_error(test_results, test_states, e.as_str()));
+                        }
                     }
                 }
             }
 
-            if !result.execution_completed {
-                return Err("Timeout waiting for test execution to complete".into());
-            }
-
-            Ok(result)
+            // this should never occur
+            Ok(self.create_test_result_with_error(test_results, test_states, "Some internal error occured during test execution"))
         } else {
-            Err("Messaging client not initialized".into())
+            Err("Messaging client not initialized. Unity Editor is not running or we are unable to connect to it.".into())
         }
     }
 
@@ -744,7 +759,7 @@ impl UnityManager {
 
             // Send the refresh message, allow configured timeout to send
             client
-                .send_refresh_message(Some(REFRESH_SEND_TIMEOUT_SECS))
+                .send_refresh_message(Some(SEND_MESSAGE_TIMEOUT_SECS))
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             //println!("[DEBUG] Refresh message sent");
@@ -973,6 +988,86 @@ impl UnityManager {
 
         // Add a small delay to ensure Unity has time to fully shut down
         tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    
+    /// Check for any test timeout, including test finish timeout and also next test start timeout
+    fn check_test_timeout(&self, test_states: &mut HashMap<String, TestState>, run_start_time:Option<Instant>) -> Result<(), String> {
+        let mut is_running_leaf_test = false;
+        let mut last_test_finish_time:Option<Instant> = None;
+        for test_state in test_states.values_mut() {
+            // test finished
+            if let Some(finish_time) = test_state.finish_time {
+                if last_test_finish_time.is_none() || last_test_finish_time.unwrap() < finish_time {
+                    last_test_finish_time = Some(finish_time);
+                }
+            }
+            // test is running
+            else{
+                if test_state.start_time.elapsed() > Duration::from_secs(TEST_TIMEOUT_SECS) {
+                    return Err(format!("Test timeout waiting for test {} to finish, after {} seconds", test_state.adapater.full_name, TEST_TIMEOUT_SECS));
+                }
+
+                if !test_state.adapater.has_children {
+                    is_running_leaf_test = true;
+                }
+            }
+        }
+
+        if !is_running_leaf_test {
+            if last_test_finish_time.is_some() && last_test_finish_time.unwrap().elapsed() > Duration::from_secs(TEST_START_TIMEOUT_SECS) {
+                return Err(format!("Test timeout waiting for the next test to start, after {} seconds", TEST_START_TIMEOUT_SECS));
+            }
+            else if last_test_finish_time.is_none() && run_start_time.is_some() && run_start_time.unwrap().elapsed() > Duration::from_secs(TEST_START_TIMEOUT_SECS) {
+                return Err(format!("Test timeout waiting for the first test to start, after {} seconds", TEST_START_TIMEOUT_SECS));
+            }
+        }
+
+        Ok(())
+    }
+    
+    /// Create test result with error
+    fn create_test_result_with_error(&self, test_results: Vec<SimpleTestResult>, test_states: HashMap<String, TestState>, error_message: &str) -> TestExecutionResult {
+        // let's count the tests
+        let mut pass_count = 0;
+        let mut fail_count = 0;
+        for test_result in test_results.iter() {
+            if test_result.passed {
+                pass_count += 1;
+            }else{
+                fail_count += 1;
+            }
+        }
+
+        // also count non fishied test as failed
+        for test_state in test_states.values() {
+            if !test_state.adapater.has_children && test_state.finish_time.is_none() {
+                fail_count += 1;
+            }
+        }
+
+        // let's estimate duration by finding the first test start time
+        let mut first_test_start_time:Option<Instant> = None;
+        for test_state in test_states.values() {
+            if first_test_start_time.is_none() || first_test_start_time.unwrap() > test_state.start_time {
+                first_test_start_time = Some(test_state.start_time);
+            }
+        }
+
+        let mut duration_seconds = 0.0;
+        if let Some(first_test_start_time) = first_test_start_time {
+            duration_seconds = first_test_start_time.elapsed().as_secs_f64();
+        }
+
+        TestExecutionResult {
+            test_results,
+            execution_completed: false,
+            error_message: error_message.into(),
+            pass_count,
+            fail_count,
+            duration_seconds,
+            test_count: pass_count + fail_count,
+            skip_count: 0,
+        }
     }
 }
 

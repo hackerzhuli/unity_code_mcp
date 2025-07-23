@@ -150,7 +150,7 @@ async fn test_tcp_fallback_integration_with_unity() {
         mode: TestMode::EditMode,
         test_name: "TestExecution.Editor.TestWithLargeLog.LargeMessageTest".to_string(),
     };
-    client.execute_tests(test_filter).await
+    client.execute_tests(test_filter, None).await
         .expect("Failed to send test execution message");
     
     // Wait for test completion and collect results

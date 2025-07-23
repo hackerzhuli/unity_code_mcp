@@ -42,6 +42,8 @@ pub struct TestAdaptor {
     pub source: String,
     #[serde(rename = "TestCount")]
     pub test_count: u32,
+    #[serde(rename = "HasChildren")]
+    pub has_children: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -833,14 +835,15 @@ impl UnityMessagingClient {
     /// # Arguments
     ///
     /// * `filter` - The test filter specifying which tests to execute
+    /// * `timeout_seconds` - Maximum time to wait for Unity to be online (default: 30 seconds)
     ///
     /// # Returns
     ///
     /// Returns `Ok(())` if the request was sent successfully
-    pub async fn execute_tests(&self, filter: TestFilter) -> Result<(), UnityMessagingError> {
+    pub async fn execute_tests(&self, filter: TestFilter, timeout_seconds: Option<u64>) -> Result<(), UnityMessagingError> {
         let filter_string = filter.to_filter_string();
         let execute_tests_message = Message::new(MessageType::ExecuteTests, filter_string);
-        self.send_message(&execute_tests_message, None).await
+        self.send_message(&execute_tests_message, timeout_seconds).await
     }
 
     /// Gets the Unity address this client is connected to

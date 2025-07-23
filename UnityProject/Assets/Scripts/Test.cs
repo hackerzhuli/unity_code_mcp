@@ -1,3 +1,5 @@
+using System;
+using UnityEngine.UI;
 
 namespace UnityProject
 {
@@ -96,7 +98,7 @@ namespace UnityProject
         /// <returns>Test string</returns>
         public string GetTestString()
         {
-            return 1;
+            return "test";
         }
  
         /// <summary>
