@@ -38,10 +38,8 @@ const TEST_TIMEOUT_SECS: u64 = if cfg!(debug_assertions) { 5 } else { 180 };
 /// Timeout in seconds to wait for the next test to start
 const TEST_START_TIMEOUT_SECS: u64 = 3;
 
-/// Timeout in seconds to wait for TestRunStarted event, this need to be a little bit longer, because Unity Editor can be busy(doing anything other than compilation, e.g. importing assets or running tests)
-/// Test message is sent, if we don't wait for test to start, then Unity Editor will still run tests after it have time to
-/// If we try too frequently, then Unity Editor will keep running tests, we will get into a busy loop
-const TEST_RUN_START_TIMEOUT_SECS: u64 = 180;
+/// Timeout in seconds to wait for TestRunStarted event, this need to be a little bit longer, because Unity Editor can be busy(e.g. importing assets, something that we don't track, we track compilation, running tests, Play Mode, but there can be operation that we don't track happening)
+const TEST_RUN_START_TIMEOUT_SECS: u64 = 30;
 
 /// Result of a refresh operation
 #[derive(Debug, Clone)]
