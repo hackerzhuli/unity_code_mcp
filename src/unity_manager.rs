@@ -182,6 +182,7 @@ pub struct UnityManager {
     is_listening: bool,
     current_unity_pid: Option<u32>,
     last_compilation_finished: Arc<Mutex<Option<SystemTime>>>,
+    current_test_run_id: Arc<Mutex<Option<String>>>,
 }
 
 impl UnityManager {
@@ -199,6 +200,7 @@ impl UnityManager {
             is_listening: false,
             current_unity_pid: None,
             last_compilation_finished: Arc::new(Mutex::new(None)),
+            current_test_run_id: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -320,6 +322,7 @@ impl UnityManager {
         let logs = Arc::clone(&self.logs);
         let seen_logs = Arc::clone(&self.seen_logs);
         let last_compilation_finished = Arc::clone(&self.last_compilation_finished);
+        let current_test_run_id = Arc::clone(&self.current_test_run_id);
         let max_logs = self.max_logs;
 
         tokio::spawn(async move {
@@ -384,6 +387,23 @@ impl UnityManager {
                                 if let Ok(mut timestamp_guard) = last_compilation_finished.lock() {
                                     *timestamp_guard = Some(SystemTime::now());
                                     debug_log!("Updated last compilation finished timestamp");
+                                }
+                            }
+                            UnityEvent::TestRunStarted(container) => {
+                                // Track the root test run ID
+                                if let Some(first_adaptor) = container.test_adaptors.first() {
+                                    if let Ok(mut test_run_guard) = current_test_run_id.lock() {
+                                        *test_run_guard = Some(first_adaptor.id.clone());
+                                        debug_log!("Test run started with root ID: {}", first_adaptor.id);
+                                    }
+                                }
+                            }
+                            UnityEvent::TestRunFinished(_) => {
+                                // Clear the test run ID when test run finishes
+                                if let Ok(mut test_run_guard) = current_test_run_id.lock() {
+                                    if let Some(test_id) = test_run_guard.take() {
+                                        debug_log!("Test run finished for ID: {}", test_id);
+                                    }
                                 }
                             }
                             _ => {}
@@ -452,6 +472,19 @@ impl UnityManager {
             .as_ref()
             .map(|client| client.is_connected(timeout_seconds))
             .unwrap_or(false)
+    }
+
+    /// Check if Unity is currently running tests
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if Unity is currently executing a test run, `false` otherwise
+    pub fn is_unity_running_tests(&self) -> bool {
+        if let Ok(test_run_guard) = self.current_test_run_id.lock() {
+            test_run_guard.is_some()
+        } else {
+            false
+        }
     }
 
     /// Get Unity package version (not Unity Editor version)
@@ -577,6 +610,11 @@ impl UnityManager {
         &mut self,
         filter: TestFilter,
     ) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
+        // Check if Unity is currently running tests to avoid conflicts
+        if self.is_unity_running_tests() {
+            return Err("Cannot start a new test run because Unity Editor is still running tests, please try again later.".into());
+        }
+
         if let Some(client) = &mut self.messaging_client {
             // Subscribe to events before sending request
             let mut event_receiver = client.subscribe_to_events();
@@ -754,6 +792,11 @@ impl UnityManager {
     pub async fn refresh_asset_database(
         &mut self,
     ) -> Result<RefreshResult, Box<dyn std::error::Error + Send + Sync>> {
+        // Check if Unity is currently running tests to avoid conflicts
+        if self.is_unity_running_tests() {
+            return Err("Cannot refresh asset database because Unity Editor is still running tests, please try again later.".into());
+        }
+
         if let Some(client) = &mut self.messaging_client {
             // Subscribe to events before sending request
             let mut event_receiver = client.subscribe_to_events();
