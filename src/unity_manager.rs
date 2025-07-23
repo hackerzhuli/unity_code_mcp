@@ -820,7 +820,7 @@ impl UnityManager {
             // this should not occur
             Ok(self.create_test_result_with_error(root_test_adaptor, test_results, test_states, "Some internal error occured during test execution"))
         } else {
-            Err("Messaging client not initialized. Unity Editor is not running or we are unable to connect to it.".into())
+            Err(MESSAGING_CLIENT_NOT_INIT_ERROR.into())
         }
     }
 
