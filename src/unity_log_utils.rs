@@ -109,9 +109,37 @@ fn is_stack_trace_line(line: &str) -> bool {
     // - Contains file paths with line numbers: "(at ./path/file.cs:123)"
     // - Starts with Unity namespace: "UnityEditor.", "UnityEngine."
     // - Contains package cache paths: "./Library/PackageCache/"
+    // - .NET stack trace format: "   at ClassName.MethodName (...) [0x...] in <...>:0"
     
     if line.is_empty() {
         return false;
+    }
+    
+    // Check for .NET stack trace format: "   at ClassName.MethodName (...) [0x...] in <...>:0"
+    let trimmed = line.trim();
+    if trimmed.starts_with("at ") {
+        // Look for the pattern: "at Namespace.Class.Method (...) [0x...] in <...>:0"
+        if let Some(paren_pos) = trimmed.find('(') {
+            let before_paren = &trimmed[3..paren_pos].trim(); // Skip "at " prefix
+            
+            // Check if it contains a dot (indicating namespace/class structure)
+            if before_paren.contains('.') {
+                // Split by the last dot to separate class from method
+                if let Some(last_dot_pos) = before_paren.rfind('.') {
+                    let class_part = &before_paren[..last_dot_pos];
+                    let method_part = &before_paren[last_dot_pos + 1..];
+                    
+                    // Validate that both parts look like valid identifiers
+                    if is_class_name(class_part) && is_valid_identifier(method_part) {
+                        // Check for the rest of the pattern: (...) [0x...] in <...>:0
+                        let after_paren = &trimmed[paren_pos..];
+                        if after_paren.contains(") [") && after_paren.contains("] in <") && after_paren.ends_with(":0") {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
     }
     
     // Check for C# class method calls (ClassName:MethodName() or Namespace.ClassName:MethodName())
@@ -218,12 +246,17 @@ mod tests {
 
     #[test]
     fn test_is_stack_trace_line() {
-        // Should detect stack trace lines
+        // Should detect Unity-style stack trace lines
         assert!(is_stack_trace_line("UnityEditor.AssetDatabase:Refresh ()"));
         assert!(is_stack_trace_line("Hackerzhuli.Code.Editor.CodeEditorIntegrationCore:RefreshAssetDatabase () (at ./Library/PackageCache/com.hackerzhuli.code@c0eb44f77de4/Editor/CodeEditorIntegrationCore.cs:325)"));
         assert!(is_stack_trace_line("UnityEditor.EditorApplication:Internal_CallUpdateFunctions ()"));
         assert!(is_stack_trace_line("MyNamespace.MyClass:MyMethod ()"));
         assert!(is_stack_trace_line("SimpleClass:SimpleMethod ()"));
+        
+        // Should detect .NET-style stack trace lines
+        assert!(is_stack_trace_line("   at System.Xml.XmlTextReaderImpl.Throw (System.Exception e) [0x00027] in <c82eccaf10cc4668ad26ffc71b8451b4>:0"));
+        assert!(is_stack_trace_line("   at System.Xml.XmlTextReaderImpl.ParseAttributes () [0x00181] in <c82eccaf10cc4668ad26ffc71b8451b4>:0"));
+        assert!(is_stack_trace_line("   at UnityEditor.UIElements.UXMLImporterImpl.ImportXml (System.String xmlPath, UnityEngine.UIElements.VisualTreeAsset& vta) [0x00012] in <915ec34902454d698aa9a0dfd0a2eb8f>:0"));
         
         // Should not detect regular log content
         assert!(!is_stack_trace_line("Assets/UI/hello.uss (line 2): warning: Unknown property 'back'"));
@@ -232,6 +265,11 @@ mod tests {
         assert!(!is_stack_trace_line(""));
         assert!(!is_stack_trace_line("Invalid:123Method ()"));
         assert!(!is_stack_trace_line("123Invalid:Method ()"));
+        
+        // Should not detect incomplete .NET stack trace patterns
+        assert!(!is_stack_trace_line("   at System.Xml.XmlTextReaderImpl.Throw"));
+        assert!(!is_stack_trace_line("   at System.Xml.XmlTextReaderImpl.Throw (System.Exception e)"));
+        assert!(!is_stack_trace_line("System.Xml.XmlTextReaderImpl.Throw (System.Exception e) [0x00027] in <c82eccaf10cc4668ad26ffc71b8451b4>:0"));
     }
 
     #[test]
@@ -240,6 +278,16 @@ mod tests {
         
         let result = extract_main_message(log_message);
         let expected = "Compilation failed because of multiple errors:\nError 1: Missing semicolon\nError 2: Undefined variable";
+        
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_extract_main_message_with_dotnet_stack_trace() {
+        let log_message = "Syntax - Xml is not valid, exception during parsing: System.Xml.XmlException: Name cannot begin with the '<' character, hexadecimal value 0x3C. Line 11, position 5. \n   at System.Xml.XmlTextReaderImpl.Throw (System.Exception e) [0x00027] in <c82eccaf10cc4668ad26ffc71b8451b4>:0 \n   at System.Xml.XmlTextReaderImpl.Throw (System.String res, System.String[] args) [0x00029] in <c82eccaf10cc4668ad26ffc71b8451b4>:0 \n   at UnityEditor.UIElements.UXMLImporterImpl.ImportXml (System.String xmlPath, UnityEngine.UIElements.VisualTreeAsset& vta) [0x00012] in <915ec34902454d698aa9a0dfd0a2eb8f>:0 \n UnityEditor.AssetDatabase:Refresh () \n Hackerzhuli.Code.Editor.CodeEditorIntegrationCore:RefreshAssetDatabase () (at ./Library/PackageCache/com.hackerzhuli.code@c9fbe32befd1/Editor/CodeEditorIntegrationCore.cs:325)";
+        
+        let result = extract_main_message(log_message);
+        let expected = "Syntax - Xml is not valid, exception during parsing: System.Xml.XmlException: Name cannot begin with the '<' character, hexadecimal value 0x3C. Line 11, position 5.";
         
         assert_eq!(result, expected);
     }

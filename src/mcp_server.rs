@@ -109,7 +109,7 @@ impl UnityCodeMcpServer {
 
     /// Run Unity tests and return results
     #[tool(
-        description = "Run Unity tests. Supports EditMode and PlayMode tests with optional filtering."
+        description = "Run Unity tests. Supports EditMode and PlayMode tests with optional filtering. Please use refresh_asset_database tool to compile scripts before running tests(if any script changed)."
     )]
     async fn run_tests(
         &self,
@@ -169,13 +169,22 @@ impl UnityCodeMcpServer {
                     "test_count": result.test_count,
                     "duration_seconds": result.duration_seconds,
                     "test_results": result.test_results.iter().map(|test| {
+                        let combined_error = if test.error_message.is_empty() && test.error_stack_trace.is_empty() {
+                            String::new()
+                        } else if test.error_message.is_empty() {
+                            test.error_stack_trace.clone()
+                        } else if test.error_stack_trace.is_empty() {
+                            test.error_message.clone()
+                        } else {
+                            format!("{} {}", test.error_message, test.error_stack_trace)
+                        };
+                        
                         json!({
                             "full_name": test.full_name,
                             "passed": test.passed,
                             "duration_seconds": test.duration_seconds,
-                            "error_message": test.error_message,
-                            "error_stack_trace": test.error_stack_trace,
-                            "output_logs": test.output_logs
+                            "error_message": combined_error,
+                            "logs": test.output_logs.trim_end()
                         })
                     }).collect::<Vec<_>>()
                 });
