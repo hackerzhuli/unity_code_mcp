@@ -168,7 +168,8 @@ impl UnityCodeMcpServer {
         match manager.run_tests(test_filter).await {
             Ok(result) => {
                 let response = json!({
-                    "execution_completed": result.execution_completed,
+                    "test_run_completed": result.execution_completed,
+                    "test_run_error_message": result.error_message,
                     "pass_count": result.pass_count,
                     "fail_count": result.fail_count,
                     "skip_count": result.skip_count,
