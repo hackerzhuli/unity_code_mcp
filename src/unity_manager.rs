@@ -723,6 +723,7 @@ impl UnityManager {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             //println!("[DEBUG] Refresh message sent");
+            debug_log!("Refresh message sent");
 
             // refresh start should be when we actually send the message
             let refresh_start_time = SystemTime::now();

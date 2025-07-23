@@ -71,7 +71,7 @@ fn init_file_logging() {
             writeln!(
                 buf,
                 "[{}] [{}] [{}:{}] {}",
-                chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
                 record.level(),
                 record.file().unwrap_or("unknown"),
                 record.line().unwrap_or(0),
