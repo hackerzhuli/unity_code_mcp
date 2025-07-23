@@ -1,24 +1,19 @@
 # Unity Code MCP Server
 
-> A **coding-focused** Model Context Protocol (MCP) server that enables AI assistants to write Unity code autonomously, surviving domain reloads and compilation cycles.
+> A **coding-focused** Model Context Protocol (MCP) server that enables AI agents to write Unity code autonomously, surviving domain reloads and compilation cycles.
 
 ## 🎯 Why Unity Code MCP?
 
-Unity Code MCP is laser-focused on what AI agents do best - **writing code**. It's specifically designed to handle Unity's compilation cycles gracefully while providing only the essential tools needed for autonomous code development: compilation feedback and test execution.
+Unity Code MCP is laser-focused on coding. It's can handle Unity's compilation cycles gracefully while providing only the essential tools needed for autonomous code development: compilation feedback and test execution.
 
 Other Unity MCP servers typically fail when Unity is compiling or performing domain reloads, causing AI tool calls to report an error and AI agents confused about what is going on.
 
-Example, with a typical Unity MCP server, when Unity Editor is compiling, and AI make a tool call to run tests. The tool fails because of disconnection.
-
-Not Unity Code MCP! AI agent can make a tool call, whether to refresh asset database or run tests, while Unity is compiling. And the tool call will wait for the compilation to finish and then proceed to refresh asset database or run tests. Yes, AI can tell Unity to compile while Unity is compiling! In fact AI can modify code while Unity is compiling and then tell Unity to compile while Unity is still compiling and the tool call will still succeed because it will wait for the compilation to finish and trigger a new compilation(only if needed).
-
-**🎯 Coding-First Philosophy**: Unlike other Unity MCP servers, we deliberately exclude scene editing, package management, and asset manipulation. This focused approach allow us to ensure high quality and high performance implementation because there is less code to maintain. This also reduces your token usage because AI has less instructions to read about the tools.
+This enables AI agents to develop Unity code autonomously, handling compilation and testing without human intervention.
 
 ## ✨ Key Features
 
-- **🔄 Compilation-Resilient**: Survives Unity domain reloads and compilation cycles
-- **🤖 AI-Optimized**: Streamlined tools designed for efficient AI agent coding workflows
-- **⚡ Performance-Focused**: Minimal token usage with targeted, essential operations
+- **🤖 Coding-Optimized**: Streamlined tools designed for efficient AI agent coding workflows
+- **⚡ Performance-Focused**: Minimal token usage with essential operations
 - **🧪 Test-Driven**: Comprehensive test execution and reporting capabilities
 - **📦 Self-Contained**: Single binary with no runtime dependencies (no Node.js, Python, or .NET required)
 - **🚀 High Performance**: Built in Rust for speed and minimal resource usage
@@ -29,45 +24,42 @@ Unity Code MCP provides **exactly two tools** designed for autonomous code devel
 
 ### 1. **Asset Database Refresh**
 - Triggers Unity compilation and asset processing
-- Returns only compilation errors and other errors during the refresh, no warnings or info logs.
-- Handles domain reload scenarios gracefully
-- Essential for validating code correctness
+- Returns only compilation errors and other non compile warning and errors during the refresh
+- Handles domain reload gracefully
 
 ### 2. **Test Execution**
 - Runs Unity tests with comprehensive reporting
-- Provides stack traces for failures
-- Provides logs for logs captured in a test (this will help AI agents to debug the test by inserting `Debug.Log` statements)
+- Provides detailed stack traces and logs for failures
 - Supports both EditMode and PlayMode tests
 
-### Why Only Two Tools?
+## 🚀 Autonomous AI agent workflow example
 
-This laser-focused approach maximizes AI efficiency by:
-- **Eliminating token waste** on non-coding operations
-- **Concentrating on AI strengths** - writing code
-- **Providing only essential feedback** for the code development loop
-- **Reducing complexity** and potential failure points
-
-Result: AI agents maintain a highly productive development loop: *write → compile → fix errors → test → fix bugs → repeat*.
-
-AI agents can't read other logs, only current compilation errors from Asset Database Refresh tool call, this means less waste of tool calls and less token usage, give AI only what is useful.
-
-## 🚀 Quick Start Example
-
-Once configured, AI assistants can interact with Unity like this:
+Once configured, AI agents can develop Unity code completely autonomously:
 
 ```
-AI: I'll create a new player controller script and test it.
+User: "Create a player controller that moves with WASD keys and has jump functionality. Make sure it's fully tested."
 
-1. [AI writes PlayerController.cs]
+AI: I'll create a complete player controller with movement and jumping, then write comprehensive tests.
+
+1. [AI writes PlayerController.cs with movement logic]
 2. [AI calls: refresh_asset_database]
+   → Result: "Compilation failed: CS0246: The type or namespace name 'Rigidbody' could not be found"
+3. [AI fixes the missing using UnityEngine; statement]
+4. [AI calls: refresh_asset_database]
    → Result: "Compilation successful, no errors"
-3. [AI writes PlayerControllerTests.cs]
-4. [AI calls: run_tests]
-   → Result: "3 tests passed, 1 test failed: NullReferenceException in MovePlayer_ShouldUpdatePosition"
-5. [AI fixes the bug and repeats until all tests pass]
+5. [AI writes PlayerControllerTests.cs with movement and jump tests]
+6. [AI calls: run_tests]
+   → Result: "5 tests passed, 2 tests failed: NullReferenceException in Jump_ShouldApplyUpwardForce, ArgumentException in Move_WithInvalidInput"
+7. [AI analyzes failures and fixes null reference and input validation bugs]
+8. [AI calls: refresh_asset_database]
+   → Result: "Compilation successful, no errors"
+9. [AI calls: run_tests]
+   → Result: "All 7 tests passed successfully"
+
+AI: ✅ Complete! Created a fully functional PlayerController with WASD movement, jump mechanics, and comprehensive test coverage. All tests are passing.
 ```
 
-This seamless workflow allows AI assistants to develop Unity code autonomously, handling compilation and testing without human intervention.
+This demonstrates true autonomous development - from user request to fully tested, working Unity code without any human intervention.
 
 ## 📦 Installation
 
