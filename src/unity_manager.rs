@@ -24,7 +24,7 @@ pub struct RefreshResult {
     /// Whether compilation completed during the refresh
     pub compilation_completed: bool,
     /// Error logs collected during the refresh process
-    pub error_logs: Vec<String>,
+    pub problems: Vec<String>,
     /// Total duration of the refresh operation in seconds
     pub duration_seconds: f64,
 }
@@ -756,7 +756,7 @@ impl UnityManager {
                                         refresh_error_message: Some(message),
                                         compilation_started: false,
                                         compilation_completed: false,
-                                        error_logs: Vec::new(),
+                                        problems: Vec::new(),
                                         duration_seconds: duration,
                                     });
                                 }
@@ -782,7 +782,7 @@ impl UnityManager {
                     refresh_error_message: Some("Timeout waiting for refresh response".to_string()),
                     compilation_started: false,
                     compilation_completed: false,
-                    error_logs: Vec::new(),
+                    problems: Vec::new(),
                     duration_seconds: duration,
                 });
             }
@@ -847,7 +847,7 @@ impl UnityManager {
                         ),
                         compilation_started: true,
                         compilation_completed: false,
-                        error_logs: Vec::new(),
+                        problems: Vec::new(),
                         duration_seconds: duration,
                     });
                 }
@@ -875,7 +875,7 @@ impl UnityManager {
                 refresh_error_message: None,
                 compilation_started: compilation_started,
                 compilation_completed: compilation_finished,
-                error_logs: logs,
+                problems: logs,
                 duration_seconds: duration,
             })
         } else {
@@ -909,7 +909,8 @@ impl UnityManager {
                 .filter(|log| {
                     (log.level == LogLevel::Error || log.level == LogLevel::Warning)
                         && log.timestamp >= refresh_start_time
-                        && !log.message.contains("warning CS") // don't collect compile warnings, there can be too many, for other assets, warning can be useful
+                        && !log.message.contains("warning CS") // don't collect compile warnings, there can be too many, for other languages, there are less warnings, so they are fine
+                        && (log.message.contains("error") || log.message.contains("warning")) // this is the pattern for language errors and warnings, cs/uss/uxml etc., so we only collect relavant stuff
                 })
                 .map(|log| log.message.clone())
                 .collect();

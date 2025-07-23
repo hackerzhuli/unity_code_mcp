@@ -84,7 +84,7 @@ impl UnityCodeMcpServer {
 
     /// Refresh Unity asset database and return compilation errors
     #[tool(
-        description = "Refresh Unity asset database, which also compiles scripts if necessary. Returns error logs including compilation errors if any. If no compilation happened this time but there still are compile errors, they will be included in error logs too."
+        description = "Refresh Unity asset database, which compiles C# scripts if scripts changed. Returns detected problems (e.g. C# compile errors) if any."
     )]
     async fn refresh_asset_database(&self) -> Result<CallToolResult, McpError> {
         self.ensure_unity_manager().await?;
@@ -99,7 +99,7 @@ impl UnityCodeMcpServer {
                     "refresh_error_message": result.refresh_error_message,
                     "compilation_started": result.compilation_started,
                     "compilation_completed": result.compilation_completed,
-                    "error_logs": result.error_logs,
+                    "problems": result.problems,
                     "duration_seconds": result.duration_seconds
                 });
                 Ok(CallToolResult::success(vec![Content::text(

@@ -283,17 +283,17 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
             println!("Refresh completed: {}", result.refresh_completed);
             println!("Compilation occurred: {}", result.compilation_started);
             println!("Duration: {:.2} seconds", result.duration_seconds);
-            println!("Collected {} error logs during refresh", result.error_logs.len());
+            println!("Collected {} error logs during refresh", result.problems.len());
             
             // Verify refresh completed successfully
             assert!(result.refresh_completed, "Refresh should have completed successfully");
             assert!(result.refresh_error_message.is_none(), "Refresh should not have error message: {:?}", result.refresh_error_message);
             
             // Verify we received compilation error logs
-            assert!(!result.error_logs.is_empty(), "Should have received compilation error logs");
+            assert!(!result.problems.is_empty(), "Should have received compilation error logs");
             
             // Check that the error logs contain compilation-related errors
-            let compilation_errors: Vec<_> = result.error_logs.iter().filter(|log| {
+            let compilation_errors: Vec<_> = result.problems.iter().filter(|log| {
                 let msg_lower = log.to_lowercase();
                 msg_lower.contains("error") || 
                 msg_lower.contains("compilation") ||
@@ -304,12 +304,12 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
             }).collect();
             
             assert!(!compilation_errors.is_empty(), 
-                   "Should have received compilation-related error logs. Received logs: {:?}", result.error_logs);
+                   "Should have received compilation-related error logs. Received logs: {:?}", result.problems);
             
             println!("✓ Received {} compilation-related error logs", compilation_errors.len());
             
             // Print some of the error logs for debugging
-            for (i, log) in result.error_logs.iter().take(3).enumerate() {
+            for (i, log) in result.problems.iter().take(3).enumerate() {
                 println!("Error log {}: {}", i + 1, log);
             }
         },
