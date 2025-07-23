@@ -14,7 +14,7 @@ This MCP server enables AI agents to develop Unity code autonomously, write code
 ## ✨ Key Features
 
 - **🤖 Coding-Optimized**: Streamlined tools designed for efficient AI agent coding workflows
-- **⚡ Performance-Focused**: Minimal token usage with essential operations, only returns relavant information
+- **⚡ Performance-Focused**: Minimal token usage with essential operations, only returns relevant information
 - **🧪 Test-Driven**: Comprehensive test execution and reporting capabilities
 - **📦 Self-Contained**: Single binary with no runtime dependencies (no Node.js, Python, or .NET required)
 
@@ -66,19 +66,17 @@ This demonstrates true autonomous development - from user request to fully teste
 ### Prerequisites
 - Unity 6.0 or higher
 - Rust toolchain (for building from source)
-- CMake (required for building dependencies)
+- CMake and a C compiler (required for building dependencies)
 
 ### Step 1: Install Unity Package
 Install the [Visual Studio Code Editor](https://github.com/hackerzhuli/com.hackerzhuli.code) package in your Unity project.
 
 ### Step 2: Get the Binary
 **Option A: Download Release** (Recommended) (Windows Only)
-- Download the latest binary from the [Releases](https://github.com/your-repo/unity-code-mcp/releases) page
+- Download the latest binary from the Releases page
 
 **Option B: Build from Source**
 ```bash
-git clone https://github.com/your-repo/unity-code-mcp.git
-cd unity-code-mcp
 cargo build --release
 ```
 
@@ -90,9 +88,9 @@ Add the MCP server to your AI assistant configuration:
 {
   "mcpServers": {
     "unity-code": {
-      "command": "/path/to/unity-code-mcp-server",
+      "command": "/path/to/unity-code-mcp",
       "env": {
-        "UNITY_PROJECT_PATH": "/absolute/path/to/your/unity/project"
+        "UNITY_PROJECT_PATH": "/path/to/your/unity/project"
       }
     }
   }
@@ -104,10 +102,10 @@ Add the MCP server to your AI assistant configuration:
 {
   "mcp.servers": {
     "unity-code": {
-      "command": "/path/to/unity-code-mcp-server",
+      "command": "/path/to/unity-code-mcp",
       "args": [],
       "env": {
-        "UNITY_PROJECT_PATH": "/absolute/path/to/your/unity/project"
+        "UNITY_PROJECT_PATH": "/path/to/your/unity/project"
       }
     }
   }
