@@ -805,6 +805,13 @@ impl UnityManager {
                                 e.as_str(),
                             ));
                         }
+
+                        // since this is when a mini time out happened
+                        // this is the best time to check whether Unity Editor is still running
+                        // to prevent keep waiting for Unity to respond for too long if Unity shuts down unexpectedly
+                        // since we have a very generous timeout for tests 
+                        // A long timeout is important because we don't want to limit how long one test can take, one test can take minutes, it depends on the project
+                        self.update_unity_connection().await;
                     }
                 }
             }
