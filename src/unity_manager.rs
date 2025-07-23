@@ -4,7 +4,7 @@ use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::broadcast;
 use tokio::time::timeout;
 
-use crate::unity_log_utils;
+use crate::unity_log_utils::{self, extract_main_message};
 use crate::unity_messaging_client::{
     UnityMessagingClient,
 };
@@ -337,7 +337,7 @@ impl UnityManager {
                                     
                                     // Store the collected compile errors
                                     if let Ok(mut errors_guard) = compile_errors_clone.lock() {
-                                        *errors_guard = compile_errors;
+                                        *errors_guard = compile_errors.iter().map(|log| extract_main_message(log.message.as_str())).collect();
                                         debug_log!("Collected {} compile errors after compilation", errors_guard.len());
                                     }
                                 });
@@ -431,13 +431,13 @@ impl UnityManager {
     /// * `substring_pattern` - Optional substring that must be present in the message
     /// 
     /// # Returns
-    /// Vector of log messages (extracted main messages) that match the criteria
+    /// Vector of log messages that match the criteria
     fn get_recent_logs(
         logs: &Arc<Mutex<Vec<UnityLogEntry>>>,
         after_time: SystemTime,
         level_filter: Option<LogLevel>,
         substring_pattern: Option<&str>,
-    ) -> Vec<String> {
+    ) -> Vec<UnityLogEntry> {
         let mut matching_logs = Vec::new();
         
         if let Ok(logs_guard) = logs.lock() {
@@ -463,7 +463,7 @@ impl UnityManager {
                 }
                 
                 // Log matches all criteria, add to results
-                matching_logs.push(unity_log_utils::extract_main_message(&log.message));
+                matching_logs.push(log.clone());
             }
         }
         
@@ -1054,28 +1054,19 @@ impl UnityManager {
             None
         };
 
-        // Get errors during this refresh using the utility method
-        let error_logs = Self::get_recent_logs(
+        // Get errors and warnings during this refresh (excluding CS warnings because there can be too many) using the utility method
+        let recent_logs = Self::get_recent_logs(
             &self.logs,
             refresh_start_time,
-            Some(LogLevel::Error),
-            Some("error"),
+            None,
+            None,
         );
-        logs.extend(error_logs);
 
-        // Get warnings during this refresh (excluding CS warnings) using the utility method
-        let warning_logs = Self::get_recent_logs(
-            &self.logs,
-            refresh_start_time,
-            Some(LogLevel::Warning),
-            Some("warning"),
-        );
-        // Filter out CS warnings manually since the utility method doesn't support negative patterns
-        let filtered_warnings: Vec<String> = warning_logs
-            .into_iter()
-            .filter(|msg| !msg.contains("warning CS"))
-            .collect();
-        logs.extend(filtered_warnings);
+        for log in recent_logs{
+            if !log.message.contains("warning CS") && (log.level == LogLevel::Error || log.level == LogLevel::Warning) {
+                logs.push(extract_main_message(log.message.as_str()));
+            }
+        }
 
         if !compilation_started {
             // Get previous compile errors from stored vector
