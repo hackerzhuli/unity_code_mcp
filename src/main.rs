@@ -58,7 +58,7 @@ impl UnityCodeMcpServer {
         if manager_guard.is_none() {
             match UnityManager::new(self.project_path.clone()).await {
                 Ok(mut manager) => {
-                    if let Err(e) = manager.initialize_messaging().await {
+                    if let Err(e) = manager.update_unity_connection().await {
                         return Err(McpError::internal_error(
                             format!("Failed to initialize messaging: {}", e),
                             None,
