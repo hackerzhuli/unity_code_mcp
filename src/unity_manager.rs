@@ -187,6 +187,8 @@ pub struct UnityManager {
     is_in_play_mode: Arc<Mutex<bool>>,
 }
 
+const MESSAGING_CLIENT_NOT_INIT_ERROR: &'static str = "Messaging client not initialized, this is likely because Unity Editor is not running for this project.";
+
 impl UnityManager {
     /// Create a new UnityManager for the given Unity project path
     pub async fn new(project_path: String) -> Result<Self, UnityProjectError> {
@@ -556,7 +558,7 @@ impl UnityManager {
                 Err(_) => Err("Timeout waiting for Unity version response".into()),
             }
         } else {
-            Err("Messaging client not initialized".into())
+            Err(MESSAGING_CLIENT_NOT_INIT_ERROR.into())
         }
     }
 
@@ -592,7 +594,7 @@ impl UnityManager {
                 Err(_) => Err("Timeout waiting for Unity project path response".into()),
             }
         } else {
-            Err("Messaging client not initialized".into())
+            Err(MESSAGING_CLIENT_NOT_INIT_ERROR.into())
         }
     }
 
@@ -618,7 +620,7 @@ impl UnityManager {
             }
             Err("Timeout waiting for Unity to become online".into())
         } else {
-            Err("Messaging client not initialized".into())
+            Err(MESSAGING_CLIENT_NOT_INIT_ERROR.into())
         }
     }
 
@@ -630,7 +632,7 @@ impl UnityManager {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         } else {
-            Err("Messaging client not initialized".into())
+            Err(MESSAGING_CLIENT_NOT_INIT_ERROR.into())
         }
     }
 
@@ -1013,7 +1015,7 @@ impl UnityManager {
                 duration_seconds: duration,
             })
         } else {
-            Err("Messaging client not initialized".into())
+            Err(MESSAGING_CLIENT_NOT_INIT_ERROR.into())
         }
     }
 
