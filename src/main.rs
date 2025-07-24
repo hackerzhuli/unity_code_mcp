@@ -12,6 +12,7 @@ mod unity_messaging_client;
 mod unity_project_manager;
 mod unity_messages;
 mod unity_refresh_task;
+mod unity_test_task;
 
 use crate::logging::init_logging;
 use crate::mcp_server::UnityCodeMcpServer;

@@ -10,6 +10,7 @@ use crate::unity_log_utils::{self, extract_main_message};
 use crate::unity_messaging_client::UnityMessagingClient;
 use crate::unity_project_manager::{UnityProjectError, UnityProjectManager};
 use crate::unity_refresh_task::{RefreshResult, UnityRefreshAssetDatabaseTask};
+use crate::unity_test_task::{TestExecutionResult, UnityTestExecutionTask};
 use crate::{debug_log, error_log, info_log, warn_log};
 
 // Timing constants for refresh operations
@@ -41,54 +42,8 @@ const TEST_RUN_START_TIMEOUT_SECS: u64 = 30;
 
 // RefreshResult is now defined in unity_refresh_task module
 
-// Test-related structures are now imported from unity_messaging_client
-use crate::unity_messages::{LogLevel, TestAdaptor, TestFilter, UnityEvent};
-
-/// tracking running state of individual tests
-#[derive(Debug, Clone)]
-struct TestState {
-    start_time: std::time::Instant,
-    finish_time: Option<std::time::Instant>,
-    adapater: TestAdaptor,
-}
-
-/// Simplified test result containing only essential information
-#[derive(Debug, Clone)]
-pub struct SimpleTestResult {
-    /// The full name of the test including namespace and class
-    pub full_name: String,
-    /// Stack trace information if the test failed, empty if passed
-    pub error_stack_trace: String,
-    /// Whether the test passed (true) or failed (false)
-    pub passed: bool,
-    /// Duration of the test execution in seconds
-    pub duration_seconds: f64,
-    /// Error or failure message, empty if the test passed
-    pub error_message: String,
-    /// Test output logs captured during execution
-    pub output_logs: String,
-}
-
-/// Test execution result
-#[derive(Debug, Clone)]
-pub struct TestExecutionResult {
-    /// Simplified test results containing only essential information
-    pub test_results: Vec<SimpleTestResult>,
-    /// Whether the test execution completed successfully
-    pub execution_completed: bool,
-    /// Total number of tests that passed
-    pub pass_count: u32,
-    /// Total number of tests that failed
-    pub fail_count: u32,
-    /// Total duration of the test execution in seconds
-    pub duration_seconds: f64,
-    /// Total number of tests
-    pub test_count: u32,
-    /// Total number of tests that skipped
-    pub skip_count: u32,
-    /// Additional error message, empty if no additional error occurred
-    pub error_message: String,
-}
+// Test-related structures are now imported from unity_test_task
+use crate::unity_messages::{LogLevel, TestFilter, UnityEvent};
 
 pub struct UnityManager {
     messaging_client: Option<UnityMessagingClient>,
@@ -497,10 +452,18 @@ impl UnityManager {
                 return Err("Cannot start a new test run because Unity Editor is in Play mode, please stop Play mode and try again.".into());
             }
 
+            // Create and initialize the test execution task
+            let mut test_task = UnityTestExecutionTask::new(
+                filter.clone(),
+                TEST_RUN_START_TIMEOUT_SECS,
+                TEST_TIMEOUT_SECS,
+                TEST_START_TIMEOUT_SECS,
+            );
+
             // Subscribe to events before sending request
             let mut event_receiver = client.subscribe_to_events();
 
-            // Send the test execution request directly - TestStarted events will provide the mapping
+            // Send the test execution request
             debug_log!(
                 "Sending test filter to Unity: '{}'",
                 filter.to_filter_string()
@@ -511,16 +474,10 @@ impl UnityManager {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
-            let execute_test_message_sent_time = Instant::now();
-
-            // Temporary mapping from TestId to test full name for building SimpleTestResult
-            let mut test_states: HashMap<String, TestState> = HashMap::new();
-
-            let mut test_results: Vec<SimpleTestResult> = Vec::new();
-
-            let mut run_start_time: Option<Instant> = None;
-
-            let mut root_test_adaptor: Option<TestAdaptor> = None;
+            // Mark test execution as started
+            if let Err(e) = test_task.mark_test_execution_started() {
+                return Err(format!("Failed to start test execution task: {}", e).into());
+            }
 
             // Wait for test execution to complete
             loop {
@@ -533,8 +490,9 @@ impl UnityManager {
                                     "Test run started with {} test adaptors",
                                     container.test_adaptors.len()
                                 );
-                                run_start_time = Some(Instant::now());
-                                root_test_adaptor = Some(container.test_adaptors[0].clone());
+                                if let Err(e) = test_task.mark_test_run_started(container.test_adaptors) {
+                                    return Err(format!("Failed to mark test run started: {}", e).into());
+                                }
                             }
                             UnityEvent::TestStarted(container) => {
                                 debug_log!(
@@ -542,7 +500,7 @@ impl UnityManager {
                                     container.test_adaptors.len()
                                 );
 
-                                // Build test ID to adaptor mapping from parsed data
+                                // Log test adaptor details
                                 for adaptor in &container.test_adaptors {
                                     debug_log!(
                                         "TestStarted adaptor - Id: '{}', Name: '{}', FullName: '{}', Type: {:?}",
@@ -551,14 +509,10 @@ impl UnityManager {
                                         adaptor.full_name,
                                         adaptor.test_type
                                     );
-                                    test_states.insert(
-                                        adaptor.id.clone(),
-                                        TestState {
-                                            start_time: std::time::Instant::now(),
-                                            finish_time: None,
-                                            adapater: adaptor.clone(),
-                                        },
-                                    );
+                                }
+
+                                if let Err(e) = test_task.handle_test_started(container.test_adaptors) {
+                                    return Err(format!("Failed to handle test started: {}", e).into());
                                 }
                             }
                             UnityEvent::TestFinished(container) => {
@@ -567,7 +521,7 @@ impl UnityManager {
                                     container.test_result_adaptors.len()
                                 );
 
-                                // Extract individual test results from parsed data
+                                // Log test result details
                                 for adaptor in &container.test_result_adaptors {
                                     debug_log!(
                                         "TestFinished adaptor - TestId: '{}', PassCount: {}, FailCount: {}, ResultState: '{}'",
@@ -576,62 +530,28 @@ impl UnityManager {
                                         adaptor.fail_count,
                                         adaptor.result_state
                                     );
+                                }
 
-                                    // record finish time
-                                    if let Some(test_state) = test_states.get_mut(&adaptor.test_id)
-                                    {
-                                        test_state.finish_time = Some(std::time::Instant::now());
-                                    }
-
-                                    // only add tests that don't have children
-                                    if adaptor.has_children {
-                                        continue;
-                                    }
-
-                                    // Create SimpleTestResult from TestResultAdaptor
-                                    if let Some(test_state) = test_states.get(&adaptor.test_id) {
-                                        let simple_result = SimpleTestResult {
-                                            full_name: test_state.adapater.full_name.clone(),
-                                            error_stack_trace: adaptor.stack_trace.clone(),
-                                            passed: adaptor.result_state == "Passed",
-                                            duration_seconds: adaptor.duration,
-                                            error_message: adaptor.message.clone(),
-                                            output_logs: adaptor.output.clone(),
-                                        };
-
-                                        test_results.push(simple_result);
-                                    }
+                                if let Err(e) = test_task.handle_test_finished(container.test_result_adaptors) {
+                                    return Err(format!("Failed to handle test finished: {}", e).into());
                                 }
                             }
                             UnityEvent::TestRunFinished(container) => {
                                 debug_log!("Test run finished");
 
-                                // Extract pass/fail counts from parsed data
-                                if let Some(adaptor) = container.test_result_adaptors.first() {
-                                    let result = TestExecutionResult {
-                                        pass_count: adaptor.pass_count,
-                                        fail_count: adaptor.fail_count,
-                                        skip_count: adaptor.skip_count,
-                                        duration_seconds: adaptor.duration,
-                                        test_count: adaptor.pass_count
-                                            + adaptor.fail_count
-                                            + adaptor.skip_count,
-                                        test_results,
-                                        execution_completed: true,
-                                        error_message: "".into(),
-                                    };
-
-                                    debug_log!(
-                                        "Extracted counts from TestRunFinished: {} passed, {} failed",
-                                        adaptor.pass_count,
-                                        adaptor.fail_count
-                                    );
-
-                                    return Ok(result);
-                                } else {
-                                    debug_log!("No test result adaptors in TestRunFinished");
+                                match test_task.handle_test_run_finished(container.test_result_adaptors) {
+                                    Ok(result) => {
+                                        debug_log!(
+                                            "Extracted counts from TestRunFinished: {} passed, {} failed",
+                                            result.pass_count,
+                                            result.fail_count
+                                        );
+                                        return Ok(result);
+                                    }
+                                    Err(e) => {
+                                        return Ok(test_task.create_test_result_with_error(&e));
+                                    }
                                 }
-                                break;
                             }
                             _ => {
                                 // Ignore other events during test execution
@@ -639,49 +559,22 @@ impl UnityManager {
                         }
                     }
                     Ok(Err(_)) => {
-                        return Ok(self.create_test_result_with_error(
-                            root_test_adaptor,
-                            test_results,
-                            test_states,
+                        return Ok(test_task.create_test_result_with_error(
                             "Event channel closed during test execution. Hint: Unity Editor process shuts down unexpectedly, it could have crashed or been killed by user.",
                         ));
                     }
                     Err(_) => {
-                        if run_start_time.is_none()
-                            && execute_test_message_sent_time.elapsed()
-                                >= Duration::from_secs(TEST_RUN_START_TIMEOUT_SECS)
-                        {
-                            return Err(format!("Test run didn't start within {} seconds. Hint: Unity Editor is busy and can't respond now, please try again later.", TEST_RUN_START_TIMEOUT_SECS).into());
-                        }
-
-                        // check for time out in tests
-                        if let Err(e) = self.check_test_timeout(&mut test_states, run_start_time) {
+                        // Check for timeouts
+                        if let Err(e) = test_task.update() {
                             // Return results with error message instead of just error
-                            return Ok(self.create_test_result_with_error(
-                                root_test_adaptor,
-                                test_results,
-                                test_states,
-                                e.as_str(),
-                            ));
+                            return Ok(test_task.create_test_result_with_error(&e));
                         }
 
-                        // since this is when a mini time out happened
-                        // this is the best time to check whether Unity Editor is still running
-                        // to prevent keep waiting for Unity to respond for too long if Unity shuts down unexpectedly
-                        // since we have a very generous timeout for tests
-                        // A long timeout is important because we don't want to limit how long one test can take, one test can take minutes, it depends on the project
+                        // Check if Unity Editor is still running
                         self.update_unity_connection().await;
                     }
                 }
             }
-
-            // this should not occur
-            Ok(self.create_test_result_with_error(
-                root_test_adaptor,
-                test_results,
-                test_states,
-                "Some internal error occured during test execution",
-            ))
         } else {
             Err(MESSAGING_CLIENT_NOT_INIT_ERROR.into())
         }
@@ -809,118 +702,7 @@ impl UnityManager {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    /// Check for any test timeout, including test finish timeout and also next test start timeout
-    fn check_test_timeout(
-        &self,
-        test_states: &mut HashMap<String, TestState>,
-        run_start_time: Option<Instant>,
-    ) -> Result<(), String> {
-        let mut is_running_leaf_test = false;
-        let mut last_test_finish_time: Option<Instant> = None;
-        for test_state in test_states.values_mut() {
-            // test finished
-            if let Some(finish_time) = test_state.finish_time {
-                if last_test_finish_time.is_none() || last_test_finish_time.unwrap() < finish_time {
-                    last_test_finish_time = Some(finish_time);
-                }
-            }
-            // test is running
-            else {
-                if !test_state.adapater.has_children
-                    && test_state.start_time.elapsed() > Duration::from_secs(TEST_TIMEOUT_SECS)
-                {
-                    return Err(format!(
-                        "Test timeout waiting for test {} to finish, after {} seconds",
-                        test_state.adapater.full_name, TEST_TIMEOUT_SECS
-                    ));
-                }
 
-                if !test_state.adapater.has_children {
-                    is_running_leaf_test = true;
-                }
-            }
-        }
-
-        if !is_running_leaf_test {
-            if last_test_finish_time.is_some()
-                && last_test_finish_time.unwrap().elapsed()
-                    > Duration::from_secs(TEST_START_TIMEOUT_SECS)
-            {
-                return Err(format!(
-                    "Test timeout waiting for the next test to start, after {} seconds",
-                    TEST_START_TIMEOUT_SECS
-                ));
-            } else if last_test_finish_time.is_none()
-                && run_start_time.is_some()
-                && run_start_time.unwrap().elapsed() > Duration::from_secs(TEST_START_TIMEOUT_SECS)
-            {
-                return Err(format!(
-                    "Test timeout waiting for the first test to start, after {} seconds",
-                    TEST_START_TIMEOUT_SECS
-                ));
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Create test result with error
-    fn create_test_result_with_error(
-        &self,
-        root_test_adaptor: Option<TestAdaptor>,
-        test_results: Vec<SimpleTestResult>,
-        test_states: HashMap<String, TestState>,
-        error_message: &str,
-    ) -> TestExecutionResult {
-        // let's count the tests
-        let mut pass_count = 0;
-        let mut fail_count = 0;
-        for test_result in test_results.iter() {
-            if test_result.passed {
-                pass_count += 1;
-            } else {
-                fail_count += 1;
-            }
-        }
-
-        let mut test_count = pass_count + fail_count;
-        if root_test_adaptor.is_some() {
-            test_count = root_test_adaptor.unwrap().test_count;
-        }
-
-        // also count non fishied test as failed
-        for test_state in test_states.values() {
-            if !test_state.adapater.has_children && test_state.finish_time.is_none() {
-                fail_count += 1;
-            }
-        }
-
-        // let's estimate duration by finding the first test start time
-        let mut first_test_start_time: Option<Instant> = None;
-        for test_state in test_states.values() {
-            if first_test_start_time.is_none()
-                || first_test_start_time.unwrap() > test_state.start_time
-            {
-                first_test_start_time = Some(test_state.start_time);
-            }
-        }
-
-        let mut duration_seconds = 0.0;
-        if let Some(first_test_start_time) = first_test_start_time {
-            duration_seconds = first_test_start_time.elapsed().as_secs_f64();
-        }
-
-        TestExecutionResult {
-            test_results,
-            execution_completed: false,
-            error_message: error_message.into(),
-            pass_count,
-            fail_count,
-            duration_seconds,
-            test_count: test_count,
-            skip_count: test_count - pass_count - fail_count,
-        }
-    }
 }
 
 impl Drop for UnityManager {
