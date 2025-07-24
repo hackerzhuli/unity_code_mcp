@@ -91,7 +91,7 @@ impl TestMode {
 }
 
 /// Test execution filter options
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TestFilter {
     /// Execute all tests in the specified mode
     All(TestMode),

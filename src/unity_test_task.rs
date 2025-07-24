@@ -105,9 +105,9 @@ pub struct UnityTestExecutionTask {
     root_test_adaptor: Option<TestAdaptor>,
     
     // Configurable timeout values (all in seconds)
-    test_run_start_timeout_secs: u64,
-    test_timeout_secs: u64,
-    test_start_timeout_secs: u64,
+    test_run_start_timeout_secs: f64,
+    test_timeout_secs: f64,
+    test_start_timeout_secs: f64,
 }
 
 impl UnityTestExecutionTask {
@@ -121,9 +121,9 @@ impl UnityTestExecutionTask {
     /// * `test_start_timeout_secs` - Timeout in seconds to wait for the next test to start
     pub fn new(
         filter: TestFilter,
-        test_run_start_timeout_secs: u64,
-        test_timeout_secs: u64,
-        test_start_timeout_secs: u64,
+        test_run_start_timeout_secs: f64,
+        test_timeout_secs: f64,
+        test_start_timeout_secs: f64,
     ) -> Self {
         Self {
             operation_start: Instant::now(),
@@ -281,7 +281,7 @@ impl UnityTestExecutionTask {
         
         match self.state {
             TestExecutionState::TestExecutionSent => {
-                if elapsed > Duration::from_secs(self.test_run_start_timeout_secs) {
+                if elapsed > Duration::from_secs_f64(self.test_run_start_timeout_secs) {
                     let message = format!(
                         "Test run didn't start within {} seconds. Hint: Unity Editor is busy and can't respond now, please try again later.",
                         self.test_run_start_timeout_secs
@@ -319,7 +319,7 @@ impl UnityTestExecutionTask {
             // Test is running
             else {
                 if !test_state.adaptor.has_children
-                    && test_state.start_time.elapsed() > Duration::from_secs(self.test_timeout_secs)
+                    && test_state.start_time.elapsed() > Duration::from_secs_f64(self.test_timeout_secs)
                 {
                     return Err(format!(
                         "Test timeout waiting for test {} to finish, after {} seconds",
@@ -335,14 +335,14 @@ impl UnityTestExecutionTask {
 
         if !is_running_leaf_test {
             if let Some(last_finish_time) = last_test_finish_time {
-                if last_finish_time.elapsed() > Duration::from_secs(self.test_start_timeout_secs) {
+                if last_finish_time.elapsed() > Duration::from_secs_f64(self.test_start_timeout_secs) {
                     return Err(format!(
                         "Test timeout waiting for the next test to start, after {} seconds",
                         self.test_start_timeout_secs
                     ));
                 }
             } else if let Some(run_start_time) = self.run_start_time {
-                if run_start_time.elapsed() > Duration::from_secs(self.test_start_timeout_secs) {
+                if run_start_time.elapsed() > Duration::from_secs_f64(self.test_start_timeout_secs) {
                     return Err(format!(
                         "Test timeout waiting for the first test to start, after {} seconds",
                         self.test_start_timeout_secs
@@ -405,3 +405,7 @@ impl UnityTestExecutionTask {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "unity_test_task_tests.rs"]
+mod tests;

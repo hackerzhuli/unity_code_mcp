@@ -32,13 +32,13 @@ const POST_COMPILATION_WAIT_SECS: f64 = 1.0;
 /// Timeout in seconds for an individual test to complete after it starts
 ///
 /// Note: The timeout is different in debug and release build for easy testing with a debug build
-const TEST_TIMEOUT_SECS: u64 = if cfg!(debug_assertions) { 30 } else { 180 };
+const TEST_TIMEOUT_SECS: f64 = if cfg!(debug_assertions) { 30.0 } else { 180.0 };
 
 /// Timeout in seconds to wait for the next test to start
-const TEST_START_TIMEOUT_SECS: u64 = 3;
+const TEST_START_TIMEOUT_SECS: f64 = 3.0;
 
 /// Timeout in seconds to wait for TestRunStarted event, this need to be a little bit longer, because Unity Editor can be busy(e.g. importing assets, something that we don't track, we track compilation, running tests, Play Mode, but there can be operation that we don't track happening)
-const TEST_RUN_START_TIMEOUT_SECS: u64 = 30;
+const TEST_RUN_START_TIMEOUT_SECS: f64 = 30.0;
 
 // RefreshResult is now defined in unity_refresh_task module
 
