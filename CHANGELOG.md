@@ -2,6 +2,11 @@
 
 All notable changes to Unity Code MCP Server will be documented in this file.
 
+## [1.1.1] - 2025-07-25
+
+### Improved
+- Better compile error reporting in a asset_database_refresh call when compilation didn't occur(because scripts didn't change), we report previous compile errors. This allows AI agents to see compile errors even if the actual compilation happened out of a tool call, e.g. user might have manually triggered an asset database refresh, or the compilation happened before the MCP server started
+
 ## [1.1.0] - 2025-07-24
 
 ### Added
