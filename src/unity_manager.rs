@@ -622,7 +622,7 @@ impl UnityManager {
 
             // Wait for refresh response first
             while start_time.elapsed() < timeout_duration && !refresh_task.is_completed() {
-                match timeout(Duration::from_secs(1), event_receiver.recv()).await {
+                match timeout(Duration::from_secs(3), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
                         match event {
                             UnityEvent::RefreshCompleted(message) => {
@@ -661,6 +661,8 @@ impl UnityManager {
                         return Err("Event channel closed during refresh. Hint: Unity Editor process shuts down unexpectedly, it could have crashed or been killed by user.".into());
                     }
                     Err(_) => {
+                        // Important: Check if Unity Editor is still running
+                        self.update_unity_connection().await;
                     }
                 }
 
