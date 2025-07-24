@@ -1,5 +1,5 @@
 use crate::unity_messages::{
-    LogLevel, Message, MessageType, TestAdaptorContainer, TestFilter, TestResultAdaptorContainer,
+    LogContainer, LogLevel, Message, MessageType, TestAdaptorContainer, TestFilter, TestResultAdaptorContainer,
     UnityEvent, UnityMessagingError,
 };
 use crate::{debug_log, error_log, info_log};
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::broadcast;
@@ -27,6 +27,10 @@ pub struct UnityMessagingClient {
     current_test_run_id: Arc<Mutex<Option<String>>>,
     /// Whether Unity Editor is currently in play mode
     is_in_play_mode: Arc<Mutex<bool>>,
+    /// Timestamp of the last compilation finished event
+    last_compilation_finished: Arc<Mutex<Option<SystemTime>>>,
+    /// Compile errors collected after compilation finishes
+    last_compile_errors: Arc<Mutex<Vec<String>>>,
 }
 
 impl UnityMessagingClient {
@@ -60,6 +64,8 @@ impl UnityMessagingClient {
             is_online: Arc::new(Mutex::new(false)),
             current_test_run_id: Arc::new(Mutex::new(None)),
             is_in_play_mode: Arc::new(Mutex::new(false)),
+            last_compilation_finished: Arc::new(Mutex::new(None)),
+            last_compile_errors: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -85,6 +91,8 @@ impl UnityMessagingClient {
         let is_online = self.is_online.clone();
         let current_test_run_id = self.current_test_run_id.clone();
         let is_in_play_mode = self.is_in_play_mode.clone();
+        let last_compilation_finished = self.last_compilation_finished.clone();
+        let last_compile_errors = self.last_compile_errors.clone();
 
         // Spawn background task for message listening
         let task = tokio::spawn(async move {
@@ -95,7 +103,7 @@ impl UnityMessagingClient {
                 last_response_time,
                 is_online,
                 current_test_run_id,
-                is_in_play_mode,
+                is_in_play_mode
             )
             .await;
         });
@@ -366,6 +374,16 @@ impl UnityMessagingClient {
             // Compilation messages
             MessageType::CompilationFinished => Some(UnityEvent::CompilationFinished),
             MessageType::CompilationStarted => Some(UnityEvent::CompilationStarted),
+            MessageType::GetCompileErrors => {
+                match serde_json::from_str::<LogContainer>(&message.value) {
+                    Ok(container) => Some(UnityEvent::CompileErrors(container)),
+                    Err(e) => {
+                        error_log!("Failed to deserialize GetCompileErrors data: {}", e);
+                        debug_log!("Raw GetCompileErrors data: {}", message.value);
+                        None
+                    }
+                }
+            }
 
             // Refresh messages
             MessageType::Refresh => Some(UnityEvent::RefreshCompleted(message.value.clone())),
@@ -496,6 +514,19 @@ impl UnityMessagingClient {
         let refresh_message = Message::new(MessageType::Refresh, String::new());
         //println!("[DEBUG] Sending refresh message to Unity at {}", self.unity_address);
         self.send_message(&refresh_message, timeout_seconds).await
+    }
+
+    /// Requests compile errors from Unity
+    ///
+    /// This method sends a compile errors request to Unity. The response will be available
+    /// through the event system as a CompileErrors event.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the request was sent successfully
+    pub async fn get_compile_errors(&self) -> Result<(), UnityMessagingError> {
+        let compile_errors_message = Message::new(MessageType::GetCompileErrors, String::new());
+        self.send_message(&compile_errors_message, None).await
     }
 
     /// Executes tests based on the specified filter

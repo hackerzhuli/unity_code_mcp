@@ -1,5 +1,22 @@
 use serde::{Deserialize, Serialize};
 
+/// Unity compile error structures for proper deserialization
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LogContainer {
+    #[serde(rename = "Logs")]
+    pub logs: Vec<Log>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Log {
+    #[serde(rename = "Message")]
+    pub message: String,
+    #[serde(rename = "StackTrace")]
+    pub stack_trace: String,
+    #[serde(rename = "Timestamp")]
+    pub timestamp: i64,
+}
+
 /// Unity test result structures for proper deserialization
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TestResultAdaptorContainer {
@@ -135,6 +152,8 @@ pub enum UnityEvent {
     Offline,
     /// Unity play mode changed
     IsPlaying(bool),
+    /// Compile errors received from Unity
+    CompileErrors(LogContainer),
 }
 
 /// Message types as defined in the Unity Package Messaging Protocol
@@ -169,6 +188,7 @@ pub enum MessageType {
     Offline = 103,
     IsPlaying = 104,
     CompilationStarted = 105,
+    GetCompileErrors = 106,
 }
 
 impl From<i32> for MessageType {
@@ -202,6 +222,7 @@ impl From<i32> for MessageType {
             103 => MessageType::Offline,
             104 => MessageType::IsPlaying,
             105 => MessageType::CompilationStarted,
+            106 => MessageType::GetCompileErrors,
             _ => MessageType::None,
         }
     }
