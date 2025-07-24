@@ -481,7 +481,7 @@ impl UnityManager {
 
             // Wait for test execution to complete
             loop {
-                match timeout(Duration::from_secs(3), event_receiver.recv()).await {
+                match timeout(Duration::from_secs(1), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
                         debug_log!("Received event: {:?}", std::mem::discriminant(&event));
                         match event {
@@ -622,7 +622,7 @@ impl UnityManager {
 
             // Wait for refresh response first
             while start_time.elapsed() < timeout_duration && !refresh_task.is_completed() {
-                match timeout(Duration::from_secs(5), event_receiver.recv()).await {
+                match timeout(Duration::from_secs(1), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
                         match event {
                             UnityEvent::RefreshCompleted(message) => {
