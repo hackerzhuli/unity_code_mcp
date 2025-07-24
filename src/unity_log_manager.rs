@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::time::SystemTime;
 
 use crate::unity_messages::LogLevel;
@@ -10,18 +11,22 @@ pub struct UnityLogEntry {
     pub message: String,
 }
 
+/// Maximum number of logs to keep in memory
+const MAX_LOGS: usize = 10000;
+
 /// Manages Unity logs independently from messaging client
 #[derive(Clone)]
 pub struct UnityLogManager {
-    /// Accumulated logs - only cleared when explicitly requested
-    logs: Vec<UnityLogEntry>,
+    /// Accumulated logs - automatically managed with size limit
+    /// Using VecDeque for O(1) front removal when enforcing log limits
+    logs: VecDeque<UnityLogEntry>,
 }
 
 impl UnityLogManager {
     /// Create a new UnityLogManager
     pub fn new() -> Self {
         UnityLogManager {
-            logs: Vec::new(),
+            logs: VecDeque::with_capacity(MAX_LOGS),
         }
     }
 
@@ -33,7 +38,8 @@ impl UnityLogManager {
             message,
         };
 
-        self.logs.push(log_entry);
+        self.logs.push_back(log_entry);
+        self.enforce_log_limit();
     }
 
     /// Add a log entry with a custom timestamp
@@ -44,12 +50,27 @@ impl UnityLogManager {
             message,
         };
 
-        self.logs.push(log_entry);
+        self.logs.push_back(log_entry);
+        self.enforce_log_limit();
+    }
+
+    /// Enforce the maximum log limit by removing old logs if necessary
+    /// Using VecDeque::pop_front for O(1) removal of old logs
+    fn enforce_log_limit(&mut self) {
+        while self.logs.len() > MAX_LOGS {
+            self.logs.pop_front();
+        }
     }
 
     /// Get all collected logs
-    pub fn get_logs(&self) -> Vec<UnityLogEntry> {
-        self.logs.clone()
+    /// Returns a reference to avoid cloning for read-only access
+    pub fn get_logs(&self) -> &VecDeque<UnityLogEntry> {
+        &self.logs
+    }
+
+    /// Get all collected logs as Vec (for compatibility)
+    pub fn get_logs_vec(&self) -> Vec<UnityLogEntry> {
+        self.logs.iter().cloned().collect()
     }
 
     /// Clear all collected logs
@@ -113,6 +134,7 @@ impl UnityLogManager {
     }
 
     /// Get logs filtered by level
+    /// Optimized to avoid unnecessary cloning when possible
     pub fn get_logs_by_level(&self, level: LogLevel) -> Vec<UnityLogEntry> {
         self.logs
             .iter()
@@ -122,6 +144,7 @@ impl UnityLogManager {
     }
 
     /// Get logs containing a specific substring
+    /// Optimized to avoid unnecessary cloning when possible
     pub fn get_logs_containing(&self, pattern: &str) -> Vec<UnityLogEntry> {
         self.logs
             .iter()

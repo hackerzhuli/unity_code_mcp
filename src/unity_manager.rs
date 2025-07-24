@@ -299,10 +299,6 @@ impl UnityManager {
                                 }
                             }
                             UnityEvent::CompilationStarted => {
-                                // Clear logs when compilation starts to prevent memory growth
-                                if let Ok(mut log_manager_guard) = log_manager.lock() {
-                                    log_manager_guard.clear_logs();
-                                }
                                 // Clear previous compile errors
                                 if let Ok(mut compile_errors_guard) = last_compile_errors.lock() {
                                     compile_errors_guard.clear();
@@ -362,12 +358,7 @@ impl UnityManager {
                                     );
                                 }
 
-                                if playing {
-                                    // Clear logs when play mode starts to prevent memory growth (similar to Unity Editor's behaviour)
-                                    if let Ok(mut log_manager_guard) = log_manager.lock() {
-                                        log_manager_guard.clear_logs();
-                                    }
-                                }
+                                // No need to clear logs - automatic log management handles memory
                             }
                             _ => {}
                         }
@@ -388,7 +379,7 @@ impl UnityManager {
     /// Get all collected logs
     pub fn get_logs(&self) -> Vec<UnityLogEntry> {
         if let Ok(log_manager_guard) = self.log_manager.lock() {
-            log_manager_guard.get_logs()
+            log_manager_guard.get_logs_vec()
         } else {
             Vec::new()
         }
