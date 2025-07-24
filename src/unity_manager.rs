@@ -1,9 +1,11 @@
+use chrono;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::broadcast;
 use tokio::time::timeout;
 
+use crate::unity_log_manager::{UnityLogEntry, UnityLogManager};
 use crate::unity_log_utils::{self, extract_main_message};
 use crate::unity_messaging_client::UnityMessagingClient;
 use crate::unity_project_manager::{UnityProjectError, UnityProjectManager};
@@ -102,28 +104,19 @@ pub struct TestExecutionResult {
     pub error_message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct UnityLogEntry {
-    pub timestamp: SystemTime,
-    pub level: LogLevel,
-    pub message: String,
-}
-
 pub struct UnityManager {
     messaging_client: Option<UnityMessagingClient>,
     project_manager: UnityProjectManager,
-    /// logs, we keep accumulated logs
-    /// Only clear when enter play mode or start compilation
-    /// It can mean we can have millions of these but it's ok since we don't really search through the whole thing
-    logs: Arc<Mutex<Vec<UnityLogEntry>>>,
+    /// Log manager for handling Unity logs
+    log_manager: Arc<Mutex<UnityLogManager>>,
     current_unity_pid: Option<u32>,
-    /// Time of the last compilation finish
-    last_compilation_finished: Arc<Mutex<Option<SystemTime>>>,
     /// ID of the current test run in Unity Editor
     current_test_run_id: Arc<Mutex<Option<String>>>,
     /// Whether Unity Editor is currently in play mode
     is_in_play_mode: Arc<Mutex<bool>>,
-    /// Stored compile errors from the last compilation
+    /// Timestamp of the last compilation finished event
+    last_compilation_finished: Arc<Mutex<Option<SystemTime>>>,
+    /// Compile errors collected after compilation finishes
     last_compile_errors: Arc<Mutex<Vec<String>>>,
 }
 
@@ -137,11 +130,11 @@ impl UnityManager {
         Ok(UnityManager {
             messaging_client: None,
             project_manager,
-            logs: Arc::new(Mutex::new(Vec::new())),
+            log_manager: Arc::new(Mutex::new(UnityLogManager::new())),
             current_unity_pid: None,
-            last_compilation_finished: Arc::new(Mutex::new(None)),
             current_test_run_id: Arc::new(Mutex::new(None)),
             is_in_play_mode: Arc::new(Mutex::new(false)),
+            last_compilation_finished: Arc::new(Mutex::new(None)),
             last_compile_errors: Arc::new(Mutex::new(Vec::new())),
         })
     }
@@ -211,13 +204,21 @@ impl UnityManager {
 
     /// Reset the editor state to clean state
     fn reset_editor_state(&mut self) {
-        self.clear_logs();
+        if let Ok(mut log_manager) = self.log_manager.lock() {
+            log_manager.clear_logs();
+        }
 
         if let Ok(mut test_run_guard) = self.current_test_run_id.lock() {
             *test_run_guard = None;
         }
         if let Ok(mut play_mode_guard) = self.is_in_play_mode.lock() {
             *play_mode_guard = false;
+        }
+        if let Ok(mut compilation_guard) = self.last_compilation_finished.lock() {
+            *compilation_guard = None;
+        }
+        if let Ok(mut compile_errors_guard) = self.last_compile_errors.lock() {
+            compile_errors_guard.clear();
         }
     }
 
@@ -272,10 +273,10 @@ impl UnityManager {
         &mut self,
         mut event_receiver: broadcast::Receiver<UnityEvent>,
     ) {
-        let logs = Arc::clone(&self.logs);
-        let last_compilation_finished = Arc::clone(&self.last_compilation_finished);
+        let log_manager = self.log_manager.clone();
         let current_test_run_id = Arc::clone(&self.current_test_run_id);
         let is_in_play_mode = Arc::clone(&self.is_in_play_mode);
+        let last_compilation_finished = Arc::clone(&self.last_compilation_finished);
         let last_compile_errors = Arc::clone(&self.last_compile_errors);
 
         tokio::spawn(async move {
@@ -288,58 +289,48 @@ impl UnityManager {
                             UnityEvent::LogMessage { level, message } => {
                                 // only errors and warnings because we never use info logs anyway
                                 if level == LogLevel::Error || level == LogLevel::Warning {
-                                    let log_entry = UnityLogEntry {
-                                        timestamp: SystemTime::now(),
-                                        level: level.clone(),
-                                        message: message.clone(),
-                                    };
-
-                                    if let Ok(mut logs_guard) = logs.lock() {
-                                        logs_guard.push(log_entry);
+                                    if let Ok(mut log_manager_guard) = log_manager.lock() {
+                                        log_manager_guard.add_log_with_timestamp(
+                                            level.clone(),
+                                            message.clone(),
+                                            SystemTime::now(),
+                                        );
                                     }
                                 }
                             }
                             UnityEvent::CompilationStarted => {
                                 // Clear logs when compilation starts to prevent memory growth
-                                if let Ok(mut logs_guard) = logs.lock() {
-                                    logs_guard.clear();
+                                if let Ok(mut log_manager_guard) = log_manager.lock() {
+                                    log_manager_guard.clear_logs();
+                                }
+                                // Clear previous compile errors
+                                if let Ok(mut compile_errors_guard) = last_compile_errors.lock() {
+                                    compile_errors_guard.clear();
                                 }
                             }
                             UnityEvent::CompilationFinished => {
-                                // Update the last compilation finished timestamp
-                                let compilation_time = SystemTime::now();
-                                if let Ok(mut timestamp_guard) = last_compilation_finished.lock() {
-                                    *timestamp_guard = Some(compilation_time);
-                                    debug_log!("Updated last compilation finished timestamp");
+                                // Record compilation finished timestamp
+                                if let Ok(mut compilation_guard) = last_compilation_finished.lock()
+                                {
+                                    *compilation_guard = Some(SystemTime::now());
                                 }
 
-                                // Spawn a task to collect compile errors for 1 second
-                                let logs_clone = Arc::clone(&logs);
-                                let compile_errors_clone = Arc::clone(&last_compile_errors);
-                                tokio::spawn(async move {
-                                    // Wait for 1 second to collect compile errors
-                                    tokio::time::sleep(Duration::from_secs(1)).await;
-
-                                    // Collect compile errors from the last 1 second using the utility method
-                                    let compile_errors = Self::get_recent_logs(
-                                        &logs_clone,
-                                        compilation_time,
-                                        Some(LogLevel::Error),
-                                        Some("error CS"),
-                                    );
-
-                                    // Store the collected compile errors
-                                    if let Ok(mut errors_guard) = compile_errors_clone.lock() {
-                                        *errors_guard = compile_errors
-                                            .iter()
-                                            .map(|log| extract_main_message(log.message.as_str()))
-                                            .collect();
-                                        debug_log!(
-                                            "Collected {} compile errors after compilation",
-                                            errors_guard.len()
-                                        );
+                                // Collect compile errors from logs
+                                if let Ok(log_manager_guard) = log_manager.lock() {
+                                    if let Ok(mut compile_errors_guard) = last_compile_errors.lock()
+                                    {
+                                        let logs = log_manager_guard.get_logs();
+                                        for log_entry in logs {
+                                            if log_entry.level == LogLevel::Error {
+                                                let main_message =
+                                                    extract_main_message(&log_entry.message);
+                                                compile_errors_guard.push(main_message);
+                                            }
+                                        }
                                     }
-                                });
+                                }
+
+                                debug_log!("Compilation finished");
                             }
                             UnityEvent::TestRunStarted(container) => {
                                 // Track the root test run ID
@@ -373,8 +364,8 @@ impl UnityManager {
 
                                 if playing {
                                     // Clear logs when play mode starts to prevent memory growth (similar to Unity Editor's behaviour)
-                                    if let Ok(mut logs_guard) = logs.lock() {
-                                        logs_guard.clear();
+                                    if let Ok(mut log_manager_guard) = log_manager.lock() {
+                                        log_manager_guard.clear_logs();
                                     }
                                 }
                             }
@@ -396,8 +387,8 @@ impl UnityManager {
 
     /// Get all collected logs
     pub fn get_logs(&self) -> Vec<UnityLogEntry> {
-        if let Ok(logs_guard) = self.logs.lock() {
-            logs_guard.iter().cloned().collect()
+        if let Ok(log_manager_guard) = self.log_manager.lock() {
+            log_manager_guard.get_logs()
         } else {
             Vec::new()
         }
@@ -405,70 +396,36 @@ impl UnityManager {
 
     /// Clear all collected logs
     pub fn clear_logs(&self) {
-        if let Ok(mut logs_guard) = self.logs.lock() {
-            logs_guard.clear();
+        if let Ok(mut log_manager_guard) = self.log_manager.lock() {
+            log_manager_guard.clear_logs();
         }
     }
 
     /// Get the number of collected logs
     pub fn log_count(&self) -> usize {
-        if let Ok(logs_guard) = self.logs.lock() {
-            logs_guard.len()
+        if let Ok(log_manager_guard) = self.log_manager.lock() {
+            log_manager_guard.log_count()
         } else {
             0
         }
     }
 
-    /// Get recent logs with optional filtering
-    ///
-    /// Searches logs in reverse order (newest first) and stops when timestamp is before `after_time`.
-    /// This is optimized for cases where we typically only need recent logs.
-    ///
-    /// # Arguments
-    /// * `after_time` - Only return logs with timestamp >= this time
-    /// * `level_filter` - Optional log level filter (if None, all levels are included)
-    /// * `substring_pattern` - Optional substring that must be present in the message
-    ///
-    /// # Returns
-    /// Vector of log messages that match the criteria
-    fn get_recent_logs(
-        logs: &Arc<Mutex<Vec<UnityLogEntry>>>,
-        after_time: SystemTime,
-        level_filter: Option<LogLevel>,
-        substring_pattern: Option<&str>,
-    ) -> Vec<UnityLogEntry> {
-        let mut matching_logs = Vec::new();
-
-        if let Ok(logs_guard) = logs.lock() {
-            // Search in reverse order (newest first) and stop when we hit older timestamps
-            for log in logs_guard.iter().rev() {
-                // Stop searching if we've gone too far back in time
-                if log.timestamp < after_time {
-                    break;
-                }
-
-                // Apply level filter if specified
-                if let Some(required_level) = &level_filter {
-                    if log.level != *required_level {
-                        continue;
-                    }
-                }
-
-                // Apply substring pattern filter if specified
-                if let Some(pattern) = substring_pattern {
-                    if !log.message.contains(pattern) {
-                        continue;
-                    }
-                }
-
-                // Log matches all criteria, add to results
-                matching_logs.push(log.clone());
-            }
+    /// Get the timestamp of the last compilation finished event
+    pub fn get_last_compilation_finished(&self) -> Option<SystemTime> {
+        if let Ok(compilation_guard) = self.last_compilation_finished.lock() {
+            *compilation_guard
+        } else {
+            None
         }
+    }
 
-        // Reverse to get chronological order (oldest first)
-        matching_logs.reverse();
-        matching_logs
+    /// Get the compile errors from the last compilation
+    pub fn get_last_compile_errors(&self) -> Vec<String> {
+        if let Ok(compile_errors_guard) = self.last_compile_errors.lock() {
+            compile_errors_guard.clone()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Check if Unity is currently online
@@ -1035,40 +992,23 @@ impl UnityManager {
         }
     }
 
-    /// Collect relavant logs during refresh and potentially from previous compilation
+    /// Collect relevant logs during refresh
     fn collect_refresh_logs(
         &mut self,
         refresh_start_time: SystemTime,
-        compilation_started: bool,
+        _compilation_started: bool,
     ) -> Vec<String> {
         let mut logs: Vec<String> = Vec::new();
 
-        let last_compile_time_option = if !compilation_started {
-            if let Ok(last_compilation_guard) = self.last_compilation_finished.lock() {
-                *last_compilation_guard
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        // Get errors and warnings during this refresh (excluding CS warnings because there can be too many)
+        if let Ok(log_manager_guard) = self.log_manager.lock() {
+            let recent_logs = log_manager_guard.get_recent_logs(refresh_start_time, None, None);
 
-        // Get errors and warnings during this refresh (excluding CS warnings because there can be too many) using the utility method
-        let recent_logs = Self::get_recent_logs(&self.logs, refresh_start_time, None, None);
-
-        for log in recent_logs {
-            if !log.message.contains("warning CS")
-                && (log.level == LogLevel::Error || log.level == LogLevel::Warning)
-            {
-                logs.push(extract_main_message(log.message.as_str()));
-            }
-        }
-
-        if !compilation_started {
-            // Get previous compile errors from stored vector
-            if last_compile_time_option.is_some() {
-                if let Ok(errors_guard) = self.last_compile_errors.lock() {
-                    logs.extend(errors_guard.clone());
+            for log in recent_logs {
+                if !log.message.contains("warning CS")
+                    && (log.level == LogLevel::Error || log.level == LogLevel::Warning)
+                {
+                    logs.push(extract_main_message(log.message.as_str()));
                 }
             }
         }

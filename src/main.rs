@@ -4,6 +4,7 @@
 mod logging;
 mod mcp_server;
 mod test_utils;
+mod unity_log_manager;
 mod unity_log_utils;
 mod unity_manager;
 mod unity_manager_tests;
