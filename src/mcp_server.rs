@@ -89,10 +89,9 @@ impl UnityCodeMcpServer {
         match manager.refresh_asset_database().await {
             Ok(result) => {
                 let response = json!({
-                    "refresh_completed": result.refresh_completed,
+                    "refresh_success": result.success,
                     "refresh_error_message": result.refresh_error_message,
-                    "compilation_started": result.compilation_started,
-                    "compilation_completed": result.compilation_completed,
+                    "compilation_occurred": result.compiled,
                     "problems": result.problems,
                     "duration_seconds": result.duration_seconds
                 });

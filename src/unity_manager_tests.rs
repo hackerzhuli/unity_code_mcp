@@ -268,13 +268,13 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
     match refresh_result {
         Ok(result) => {
             println!("✓ Refresh method completed successfully");
-            println!("Refresh completed: {}", result.refresh_completed);
-            println!("Compilation occurred: {}", result.compilation_started);
+            println!("Refresh completed: {}", result.success);
+            println!("Compilation occurred: {}", result.compiled);
             println!("Duration: {:.2} seconds", result.duration_seconds);
             println!("Collected {} error logs during refresh", result.problems.len());
             
             // Verify refresh completed successfully
-            assert!(result.refresh_completed, "Refresh should have completed successfully");
+            assert!(result.success, "Refresh should have completed successfully");
             assert!(result.refresh_error_message.is_none(), "Refresh should not have error message: {:?}", result.refresh_error_message);
             
             // Verify we received compilation error logs
@@ -310,8 +310,8 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
 
     // use if let
     if let Ok(result) = refresh_result_2 {
-        assert!(result.refresh_completed, "Refresh should have completed successfully");
-        assert!(result.compilation_started, "Should have compiled");
+        assert!(result.success, "Refresh should have completed successfully");
+        assert!(result.compiled, "Should have compiled");
     }else{
         assert!(false, "Refresh should have completed successfully");
     }

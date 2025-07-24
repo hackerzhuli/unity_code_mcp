@@ -15,16 +15,16 @@ use crate::{debug_log, error_log, info_log, warn_log};
 // Timing constants for refresh operations
 
 /// Total timeout in seconds for the refresh operation(after sent, not including compilation)
-const REFRESH_TOTAL_TIMEOUT_SECS: u64 = 60;
+const REFRESH_TOTAL_TIMEOUT_SECS: f64 = 60.0;
 
-/// Timeout in milliseconds to wait for compilation to start after refresh finised
-const COMPILATION_WAIT_TIMEOUT_MILLIS: u64 = 1000;
+/// Timeout in seconds to wait for compilation to start after refresh finished
+const COMPILATION_WAIT_TIMEOUT_SECS: f64 = 1.0;
 
 /// Timeout in seconds for compilation to finish
-const COMPILATION_FINISH_TIMEOUT_SECS: u64 = 60;
+const COMPILATION_FINISH_TIMEOUT_SECS: f64 = 60.0;
 
 /// Wait time in seconds after compilation finishes for logs to arrive
-const POST_COMPILATION_WAIT_SECS: u64 = 1;
+const POST_COMPILATION_WAIT_SECS: f64 = 1.0;
 
 // Timing constants for test execution
 
@@ -711,7 +711,11 @@ impl UnityManager {
             }
 
             // Create and initialize the refresh task
-            let mut refresh_task = UnityRefreshAssetDatabaseTask::new();
+            let mut refresh_task = UnityRefreshAssetDatabaseTask::new(
+                REFRESH_TOTAL_TIMEOUT_SECS,
+                COMPILATION_WAIT_TIMEOUT_SECS,
+                COMPILATION_FINISH_TIMEOUT_SECS,
+            );
 
             // Subscribe to events before sending request
             let mut event_receiver = client.subscribe_to_events();
@@ -728,7 +732,7 @@ impl UnityManager {
                 return Err(format!("Failed to start refresh task: {}", e).into());
             }
 
-            let timeout_duration = Duration::from_secs(REFRESH_TOTAL_TIMEOUT_SECS);
+            let timeout_duration = Duration::from_secs_f64(REFRESH_TOTAL_TIMEOUT_SECS);
             let start_time = std::time::Instant::now();
 
             // Wait for refresh response first
@@ -783,7 +787,7 @@ impl UnityManager {
 
             // Wait additional time for error logs to arrive after compilation finishes
             if refresh_task.is_successful() && refresh_task.has_compilation() {
-                sleep(Duration::from_secs(POST_COMPILATION_WAIT_SECS)).await;
+                sleep(Duration::from_secs_f64(POST_COMPILATION_WAIT_SECS)).await;
             }
 
             let result = refresh_task.build_result(&self.log_manager);
