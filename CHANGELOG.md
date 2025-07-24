@@ -2,6 +2,17 @@
 
 All notable changes to Unity Code MCP Server will be documented in this file.
 
+## [1.1.0] - 2025-07-24
+
+### Added
+- Play mode state tracking to prevent actions during play mode
+- Test run tracking with conflict prevention
+- Reduce logs memory usage with size limits and smart log deduplication
+
+### Fixed
+- Correct test result counts for failed and skipped tests
+- Graceful handling of unexpected Unity Editor shutdown
+
 ## [1.0.0] - 2025-7-23
 
 ### Added
