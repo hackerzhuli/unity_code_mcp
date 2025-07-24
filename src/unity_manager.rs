@@ -9,6 +9,7 @@ use crate::unity_log_manager::{UnityLogEntry, UnityLogManager};
 use crate::unity_log_utils::{self, extract_main_message};
 use crate::unity_messaging_client::UnityMessagingClient;
 use crate::unity_project_manager::{UnityProjectError, UnityProjectManager};
+use crate::unity_refresh_task::{UnityRefreshAssetDatabaseTask, RefreshResult};
 use crate::{debug_log, error_log, info_log, warn_log};
 
 // Timing constants for refresh operations
@@ -38,22 +39,7 @@ const TEST_START_TIMEOUT_SECS: u64 = 3;
 /// Timeout in seconds to wait for TestRunStarted event, this need to be a little bit longer, because Unity Editor can be busy(e.g. importing assets, something that we don't track, we track compilation, running tests, Play Mode, but there can be operation that we don't track happening)
 const TEST_RUN_START_TIMEOUT_SECS: u64 = 30;
 
-/// Result of a refresh operation
-#[derive(Debug, Clone)]
-pub struct RefreshResult {
-    /// Whether the refresh was completed successfully
-    pub refresh_completed: bool,
-    /// Error message from refresh response (if any)
-    pub refresh_error_message: Option<String>,
-    /// Whether compilation occurred during the refresh
-    pub compilation_started: bool,
-    /// Whether compilation completed during the refresh
-    pub compilation_completed: bool,
-    /// Error logs collected during the refresh process
-    pub problems: Vec<String>,
-    /// Total duration of the refresh operation in seconds
-    pub duration_seconds: f64,
-}
+// RefreshResult is now defined in unity_refresh_task module
 
 // Test-related structures are now imported from unity_messaging_client
 use crate::unity_messages::{LogLevel, TestAdaptor, TestFilter, UnityEvent};
@@ -727,57 +713,51 @@ impl UnityManager {
                 return Err("Cannot refresh asset database because Unity Editor is in Play mode, please stop Play mode and try again.".into());
             }
 
+            // Create and initialize the refresh task
+            let mut refresh_task = UnityRefreshAssetDatabaseTask::new();
+
             // Subscribe to events before sending request
             let mut event_receiver = client.subscribe_to_events();
 
-            let operation_start = std::time::Instant::now();
-
-            // Send the refresh message, allow configured timeout to send
+            // Send the refresh message
             client
                 .send_refresh_message(None)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            //println!("[DEBUG] Refresh message sent");
             debug_log!("Refresh message sent");
-
-            // refresh start should be when we actually send the message
-            let refresh_start_time = SystemTime::now();
-
-            // Track refresh process state
-            let mut refresh_response_received = false;
-            let mut compilation_started = false;
-            let mut compilation_finished = false;
+            
+            // Mark refresh as started
+            refresh_task.mark_refresh_started();
 
             let timeout_duration = Duration::from_secs(REFRESH_TOTAL_TIMEOUT_SECS);
             let start_time = std::time::Instant::now();
 
             // Wait for refresh response first
-            while start_time.elapsed() < timeout_duration && !refresh_response_received {
+            while start_time.elapsed() < timeout_duration && !refresh_task.is_completed() {
                 match timeout(Duration::from_secs(10), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
                         match event {
                             UnityEvent::RefreshCompleted(message) => {
                                 debug_log!("Refresh completed with message: '{}'", message);
-                                refresh_response_received = true;
-
-                                // Check if refresh failed (non-empty message indicates error)
-                                if !message.is_empty() {
-                                    error_log!("Refresh failed: {}", message);
-
-                                    // Return early with error result
-                                    let duration = operation_start.elapsed().as_secs_f64();
-                                    return Ok(RefreshResult {
-                                        refresh_completed: false,
-                                        refresh_error_message: Some(message),
-                                        compilation_started: false,
-                                        compilation_completed: false,
-                                        problems: Vec::new(),
-                                        duration_seconds: duration,
-                                    });
+                                let success = message.is_empty();
+                                let error_msg = if message.is_empty() { None } else { Some(message) };
+                                refresh_task.mark_refresh_completed(success, error_msg.clone());
+                                
+                                if !success {
+                                    error_log!("Refresh failed: {}", error_msg.as_ref().unwrap());
+                                    return Ok(refresh_task.build_result(&self.log_manager));
                                 }
                             }
+                            UnityEvent::CompilationStarted => {
+                                debug_log!("Compilation started");
+                                refresh_task.mark_compilation_started();
+                            }
+                            UnityEvent::CompilationFinished => {
+                                debug_log!("Compilation finished");
+                                refresh_task.mark_compilation_finished();
+                            }
                             _ => {
-                                // Ignore other events while waiting for refresh response
+                                // Ignore other events
                             }
                         }
                     }
@@ -790,149 +770,35 @@ impl UnityManager {
                 }
             }
 
-            if !refresh_response_received {
-                let duration = operation_start.elapsed().as_secs_f64();
-                return Ok(RefreshResult {
-                    refresh_completed: false,
-                    refresh_error_message: Some("Timeout waiting for refresh response".to_string()),
-                    compilation_started: false,
-                    compilation_completed: false,
-                    problems: Vec::new(),
-                    duration_seconds: duration,
-                });
+            // Check for timeout
+            if start_time.elapsed() >= timeout_duration {
+                let error_msg = Some("Timeout waiting for refresh to complete".to_string());
+                refresh_task.mark_refresh_completed(false, error_msg);
             }
 
-            // Wait for compilation started event for 1 second
-            let compilation_wait_start = std::time::Instant::now();
-            while compilation_wait_start.elapsed()
-                < Duration::from_millis(COMPILATION_WAIT_TIMEOUT_MILLIS)
-                && !compilation_started
-            {
-                match timeout(Duration::from_millis(100), event_receiver.recv()).await {
-                    Ok(Ok(event)) => {
-                        match event {
-                            UnityEvent::CompilationStarted => {
-                                debug_log!("Compilation started");
-                                compilation_started = true;
-                            }
-                            _ => {
-                                // Ignore other events
-                            }
-                        }
-                    }
-                    Ok(Err(_)) => {
-                        return Err("Event channel closed during compilation wait".into());
-                    }
-                    Err(_) => {
-                        // Timeout on individual event - continue waiting
-                    }
-                }
-            }
-
-            // If compilation started, wait for compilation finished for 60 seconds
-            if compilation_started {
-                while start_time.elapsed() < timeout_duration && !compilation_finished {
-                    match timeout(
-                        Duration::from_secs(COMPILATION_FINISH_TIMEOUT_SECS),
-                        event_receiver.recv(),
-                    )
-                    .await
-                    {
-                        Ok(Ok(event)) => {
-                            match event {
-                                UnityEvent::CompilationFinished => {
-                                    debug_log!("Compilation finished");
-                                    compilation_finished = true;
-                                }
-                                _ => {
-                                    // Ignore other events
-                                }
-                            }
-                        }
-                        Ok(Err(_)) => {
-                            return Err("Event channel closed during compilation".into());
-                        }
-                        Err(_) => {
-                            // Timeout on individual event - continue waiting
-                        }
-                    }
-                }
-
-                if !compilation_finished {
-                    let duration = operation_start.elapsed().as_secs_f64();
-                    return Ok(RefreshResult {
-                        refresh_completed: false,
-                        refresh_error_message: Some(format!(
-                            "Timeout waiting for compilation to finish after {} seconds",
-                            COMPILATION_FINISH_TIMEOUT_SECS
-                        )),
-                        compilation_started: true,
-                        compilation_completed: false,
-                        problems: Vec::new(),
-                        duration_seconds: duration,
-                    });
-                }
-
-                // Wait additional time for error logs to arrive after compilation finishes
+            // Wait additional time for error logs to arrive after compilation finishes
+            if refresh_task.is_successful() {
                 debug_log!(
-                    "Waiting {} second(s) for error logs after compilation finished",
+                    "Waiting {} second(s) for error logs after refresh completed",
                     POST_COMPILATION_WAIT_SECS
                 );
                 tokio::time::sleep(Duration::from_secs(POST_COMPILATION_WAIT_SECS)).await;
-            } else {
-                debug_log!(
-                    "No compilation started within {} millisecond(s)",
-                    COMPILATION_WAIT_TIMEOUT_MILLIS
-                );
             }
 
-            // Filter logs from the existing log collection based on the determined time period
-            let logs: Vec<String> =
-                self.collect_refresh_logs(refresh_start_time, compilation_started);
-
-            let duration = operation_start.elapsed().as_secs_f64();
+            let result = refresh_task.build_result(&self.log_manager);
             debug_log!(
                 "Refresh completed, collected {} error logs in {:.2} seconds",
-                logs.len(),
-                duration
+                result.problems.len(),
+                result.duration_seconds
             );
 
-            Ok(RefreshResult {
-                refresh_completed: !compilation_started || compilation_finished,
-                refresh_error_message: None,
-                compilation_started: compilation_started,
-                compilation_completed: compilation_finished,
-                problems: logs,
-                duration_seconds: duration,
-            })
+            Ok(result)
         } else {
             Err(MESSAGING_CLIENT_NOT_INIT_ERROR.into())
         }
     }
 
-    /// Collect relevant logs during refresh
-    fn collect_refresh_logs(
-        &mut self,
-        refresh_start_time: SystemTime,
-        _compilation_started: bool,
-    ) -> Vec<String> {
-        let mut logs: Vec<String> = Vec::new();
-
-        // Get errors and warnings during this refresh (excluding CS warnings because there can be too many)
-        if let Ok(log_manager_guard) = self.log_manager.lock() {
-            let recent_logs = log_manager_guard.get_recent_logs(refresh_start_time, None, None);
-
-            for log in recent_logs {
-                if !log.message.contains("warning CS")
-                    && (log.level == LogLevel::Error || log.level == LogLevel::Warning)
-                {
-                    logs.push(extract_main_message(log.message.as_str()));
-                }
-            }
-        }
-
-        logs
-    }
+    // collect_refresh_logs method moved to UnityRefreshAssetDatabaseTask
 
     /// Stop the messaging client and cleanup
     pub async fn shutdown(&mut self) {
