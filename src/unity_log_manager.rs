@@ -100,31 +100,6 @@ impl UnityLogManager {
         self.enforce_log_limit();
     }
 
-    /// Add a log entry with a custom timestamp
-    pub fn add_log_with_timestamp(&mut self, level: LogLevel, message: String, timestamp: SystemTime) {
-        // Check if we should clear the deduplication cache
-        self.maybe_clear_dedup_cache(timestamp);
-        
-        // Check for duplicate within the deduplication window
-        if self.is_duplicate_log(&message, timestamp) {
-            // Update the timestamp for this message but don't add to logs
-            self.dedup_cache.insert(message, timestamp);
-            return;
-        }
-        
-        let log_entry = UnityLogEntry {
-            timestamp,
-            level,
-            message: message.clone(),
-        };
-
-        // Add to deduplication cache
-        self.dedup_cache.insert(message, timestamp);
-        
-        self.logs.push_back(log_entry);
-        self.enforce_log_limit();
-    }
-
     /// Enforce the maximum log limit by removing old logs if necessary
     /// Using VecDeque::pop_front for O(1) removal of old logs
     fn enforce_log_limit(&mut self) {

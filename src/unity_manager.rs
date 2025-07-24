@@ -110,10 +110,6 @@ pub struct UnityManager {
     /// Log manager for handling Unity logs
     log_manager: Arc<Mutex<UnityLogManager>>,
     current_unity_pid: Option<u32>,
-    /// ID of the current test run in Unity Editor
-    current_test_run_id: Arc<Mutex<Option<String>>>,
-    /// Whether Unity Editor is currently in play mode
-    is_in_play_mode: Arc<Mutex<bool>>,
     /// Timestamp of the last compilation finished event
     last_compilation_finished: Arc<Mutex<Option<SystemTime>>>,
     /// Compile errors collected after compilation finishes
@@ -132,8 +128,6 @@ impl UnityManager {
             project_manager,
             log_manager: Arc::new(Mutex::new(UnityLogManager::new())),
             current_unity_pid: None,
-            current_test_run_id: Arc::new(Mutex::new(None)),
-            is_in_play_mode: Arc::new(Mutex::new(false)),
             last_compilation_finished: Arc::new(Mutex::new(None)),
             last_compile_errors: Arc::new(Mutex::new(Vec::new())),
         })
@@ -208,12 +202,6 @@ impl UnityManager {
             log_manager.clear_logs();
         }
 
-        if let Ok(mut test_run_guard) = self.current_test_run_id.lock() {
-            *test_run_guard = None;
-        }
-        if let Ok(mut play_mode_guard) = self.is_in_play_mode.lock() {
-            *play_mode_guard = false;
-        }
         if let Ok(mut compilation_guard) = self.last_compilation_finished.lock() {
             *compilation_guard = None;
         }
@@ -274,8 +262,6 @@ impl UnityManager {
         mut event_receiver: broadcast::Receiver<UnityEvent>,
     ) {
         let log_manager = self.log_manager.clone();
-        let current_test_run_id = Arc::clone(&self.current_test_run_id);
-        let is_in_play_mode = Arc::clone(&self.is_in_play_mode);
         let last_compilation_finished = Arc::clone(&self.last_compilation_finished);
         let last_compile_errors = Arc::clone(&self.last_compile_errors);
 
@@ -290,10 +276,9 @@ impl UnityManager {
                                 // only errors and warnings because we never use info logs anyway
                                 if level == LogLevel::Error || level == LogLevel::Warning {
                                     if let Ok(mut log_manager_guard) = log_manager.lock() {
-                                        log_manager_guard.add_log_with_timestamp(
+                                        log_manager_guard.add_log(
                                             level.clone(),
-                                            message.clone(),
-                                            SystemTime::now(),
+                                            message.clone()
                                         );
                                     }
                                 }
@@ -327,38 +312,6 @@ impl UnityManager {
                                 }
 
                                 debug_log!("Compilation finished");
-                            }
-                            UnityEvent::TestRunStarted(container) => {
-                                // Track the root test run ID
-                                if let Some(first_adaptor) = container.test_adaptors.first() {
-                                    if let Ok(mut test_run_guard) = current_test_run_id.lock() {
-                                        *test_run_guard = Some(first_adaptor.id.clone());
-                                        debug_log!(
-                                            "Test run started with root ID: {}",
-                                            first_adaptor.id
-                                        );
-                                    }
-                                }
-                            }
-                            UnityEvent::TestRunFinished(_) => {
-                                // Clear the test run ID when test run finishes
-                                if let Ok(mut test_run_guard) = current_test_run_id.lock() {
-                                    if let Some(test_id) = test_run_guard.take() {
-                                        debug_log!("Test run finished for ID: {}", test_id);
-                                    }
-                                }
-                            }
-                            UnityEvent::IsPlaying(playing) => {
-                                // Track Unity's play mode state
-                                if let Ok(mut play_mode_guard) = is_in_play_mode.lock() {
-                                    *play_mode_guard = playing;
-                                    debug_log!(
-                                        "Unity play mode changed: {}",
-                                        if playing { "Playing" } else { "Stopped" }
-                                    );
-                                }
-
-                                // No need to clear logs - automatic log management handles memory
                             }
                             _ => {}
                         }
@@ -425,32 +378,6 @@ impl UnityManager {
             .as_ref()
             .map(|client| client.is_online())
             .unwrap_or(false)
-    }
-
-    /// Check if Unity is currently running tests
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if Unity is currently executing a test run, `false` otherwise
-    pub fn is_unity_running_tests(&self) -> bool {
-        if let Ok(test_run_guard) = self.current_test_run_id.lock() {
-            test_run_guard.is_some()
-        } else {
-            false
-        }
-    }
-
-    /// Check if Unity is currently in Play mode
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if Unity is currently in Play mode, `false` otherwise
-    pub fn is_unity_in_play_mode(&self) -> bool {
-        if let Ok(play_mode_guard) = self.is_in_play_mode.lock() {
-            *play_mode_guard
-        } else {
-            false
-        }
     }
 
     /// Get Unity package version (not Unity Editor version)
@@ -576,17 +503,17 @@ impl UnityManager {
         &mut self,
         filter: TestFilter,
     ) -> Result<TestExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
-        // Check if Unity is currently running tests to avoid conflicts
-        if self.is_unity_running_tests() {
-            return Err("Cannot start a new test run because Unity Editor is still running tests, please try again later.".into());
-        }
-
-        // Check if Unity is currently in Play mode to avoid conflicts
-        if self.is_unity_in_play_mode() {
-            return Err("Cannot start a new test run because Unity Editor is in Play mode, please stop Play mode and try again.".into());
-        }
-
         if let Some(client) = &mut self.messaging_client {
+            // Check if Unity is currently running tests to avoid conflicts
+            if client.is_running_tests() {
+                return Err("Cannot start a new test run because Unity Editor is still running tests, please try again later.".into());
+            }
+
+            // Check if Unity is currently in Play mode to avoid conflicts
+            if client.is_in_play_mode() {
+                return Err("Cannot start a new test run because Unity Editor is in Play mode, please stop Play mode and try again.".into());
+            }
+
             // Subscribe to events before sending request
             let mut event_receiver = client.subscribe_to_events();
 
@@ -789,17 +716,17 @@ impl UnityManager {
     pub async fn refresh_asset_database(
         &mut self,
     ) -> Result<RefreshResult, Box<dyn std::error::Error + Send + Sync>> {
-        // Check if Unity is currently running tests to avoid conflicts
-        if self.is_unity_running_tests() {
-            return Err("Cannot refresh asset database because Unity Editor is still running tests, please try again later.".into());
-        }
-
-        // Check if Unity is currently in Play mode to avoid conflicts
-        if self.is_unity_in_play_mode() {
-            return Err("Cannot refresh asset database because Unity Editor is in Play mode, please stop Play mode and try again.".into());
-        }
-
         if let Some(client) = &mut self.messaging_client {
+            // Check if Unity is currently running tests to avoid conflicts
+            if client.is_running_tests() {
+                return Err("Cannot refresh asset database because Unity Editor is still running tests, please try again later.".into());
+            }
+
+            // Check if Unity is currently in Play mode to avoid conflicts
+            if client.is_in_play_mode() {
+                return Err("Cannot refresh asset database because Unity Editor is in Play mode, please stop Play mode and try again.".into());
+            }
+
             // Subscribe to events before sending request
             let mut event_receiver = client.subscribe_to_events();
 

@@ -20,6 +20,10 @@ pub struct UnityMessagingClient {
     listener_task: Option<JoinHandle<()>>,
     last_response_time: Arc<Mutex<Option<std::time::Instant>>>,
     is_online: Arc<Mutex<bool>>,
+    /// ID of the current test run in Unity Editor
+    current_test_run_id: Arc<Mutex<Option<String>>>,
+    /// Whether Unity Editor is currently in play mode
+    is_in_play_mode: Arc<Mutex<bool>>,
 }
 
 impl UnityMessagingClient {
@@ -51,6 +55,8 @@ impl UnityMessagingClient {
             listener_task: None,
             last_response_time: Arc::new(Mutex::new(None)),
             is_online: Arc::new(Mutex::new(false)),
+            current_test_run_id: Arc::new(Mutex::new(None)),
+            is_in_play_mode: Arc::new(Mutex::new(false)),
         })
     }
 
@@ -74,6 +80,8 @@ impl UnityMessagingClient {
         let event_sender = self.event_sender.clone();
         let last_response_time = self.last_response_time.clone();
         let is_online = self.is_online.clone();
+        let current_test_run_id = self.current_test_run_id.clone();
+        let is_in_play_mode = self.is_in_play_mode.clone();
 
         // Spawn background task for message listening
         let task = tokio::spawn(async move {
@@ -83,6 +91,8 @@ impl UnityMessagingClient {
                 event_sender,
                 last_response_time,
                 is_online,
+                current_test_run_id,
+                is_in_play_mode,
             )
             .await;
         });
@@ -140,6 +150,8 @@ impl UnityMessagingClient {
         event_sender: broadcast::Sender<UnityEvent>,
         last_response_time: Arc<Mutex<Option<std::time::Instant>>>,
         is_online: Arc<Mutex<bool>>,
+        current_test_run_id: Arc<Mutex<Option<String>>>,
+        is_in_play_mode: Arc<Mutex<bool>>,
     ) {
         let mut buffer = [0u8; 8192];
         let mut ping_interval = tokio::time::interval(Duration::from_secs(1));
@@ -226,6 +238,28 @@ impl UnityMessagingClient {
                                 } else {
                                     // Handle the message and potentially broadcast an event
                                     if let Some(event) = Self::message_to_event(&message) {
+                                        // Update internal state based on the event
+                                        match &event {
+                                            UnityEvent::TestRunStarted(container) => {
+                                                 if let Ok(mut test_run_id) = current_test_run_id.lock() {
+                                                     if let Some(first_adaptor) = container.test_adaptors.first() {
+                                                         *test_run_id = Some(first_adaptor.id.clone());
+                                                     }
+                                                 }
+                                             }
+                                            UnityEvent::TestRunFinished(_) => {
+                                                if let Ok(mut test_run_id) = current_test_run_id.lock() {
+                                                    *test_run_id = None;
+                                                }
+                                            }
+                                            UnityEvent::IsPlaying(is_playing) => {
+                                                if let Ok(mut play_mode) = is_in_play_mode.lock() {
+                                                    *play_mode = *is_playing;
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                        
                                         if let Err(_) = event_sender.send(event) {
                                             // No receivers, continue listening
                                         }
@@ -495,6 +529,24 @@ impl UnityMessagingClient {
         } else {
             false
         }
+    }
+
+    /// Checks if Unity is currently running tests
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if Unity is currently running tests, `false` otherwise
+    pub fn is_running_tests(&self) -> bool {
+        self.current_test_run_id.lock().ok().is_some()
+    }
+
+    /// Checks if Unity is currently in play mode
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if Unity is in play mode, `false` otherwise
+    pub fn is_in_play_mode(&self) -> bool {
+        self.is_in_play_mode.lock().ok().map(|guard| *guard).unwrap_or(false)
     }
 }
 
