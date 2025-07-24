@@ -19,6 +19,9 @@ enum TestExecutionState {
 }
 
 /// Tracking running state of individual tests
+/// 
+/// Maintains timing information and test metadata for each test during execution.
+/// Used internally by UnityTestExecutionTask to monitor test progress and detect timeouts.
 #[derive(Debug, Clone)]
 pub struct TestState {
     pub start_time: Instant,
@@ -27,6 +30,10 @@ pub struct TestState {
 }
 
 /// Simplified test result containing only essential information
+/// 
+/// A lightweight representation of a test execution result, containing all the
+/// necessary information for reporting without Unity-specific implementation details.
+/// This struct is designed to be easily serializable and transferable.
 #[derive(Debug, Clone)]
 pub struct SimpleTestResult {
     /// The full name of the test including namespace and class
@@ -43,7 +50,11 @@ pub struct SimpleTestResult {
     pub output_logs: String,
 }
 
-/// Test execution result
+/// Comprehensive test execution result
+/// 
+/// Contains aggregated results from a complete test run, including individual test results,
+/// summary statistics, timing information, and any error messages that occurred during execution.
+/// This is the primary result type returned by the test execution system.
 #[derive(Debug, Clone)]
 pub struct TestExecutionResult {
     /// Simplified test results containing only essential information
@@ -65,6 +76,22 @@ pub struct TestExecutionResult {
 }
 
 /// Task for managing Unity test execution operations
+/// 
+/// This struct encapsulates the entire lifecycle of Unity test execution, from initial
+/// test discovery through final result collection. It provides comprehensive state management,
+/// timeout handling, and result aggregation for Unity test runs.
+/// 
+/// The task follows this state flow:
+/// 1. NotStarted -> TestExecutionSent (when test execution message is sent)
+/// 2. TestExecutionSent -> TestRunStarted (when TestRunStarted event is received)
+/// 3. TestRunStarted -> Finished/Failed (when TestRunFinished event is received or timeout occurs)
+/// 
+/// During the TestRunStarted phase, the task handles:
+/// - TestStarted events (tracks individual test timing)
+/// - TestFinished events (collects individual test results)
+/// - Timeout monitoring for both individual tests and test start delays
+/// 
+/// Configurable timeouts prevent indefinite waiting at each stage of execution.
 pub struct UnityTestExecutionTask {
     operation_start: Instant,
     state: TestExecutionState,

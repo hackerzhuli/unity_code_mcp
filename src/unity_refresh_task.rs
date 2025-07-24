@@ -21,7 +21,10 @@ enum RefreshState {
     Failed,
 }
 
-/// Result of a refresh operation
+/// Result of a Unity asset database refresh operation
+/// 
+/// Contains comprehensive information about the refresh process including success status,
+/// compilation results, error messages, and performance metrics.
 #[derive(Debug, Clone)]
 pub struct RefreshResult {
     /// Whether the refresh was completed successfully
@@ -37,6 +40,18 @@ pub struct RefreshResult {
 }
 
 /// Task for managing Unity asset database refresh operations
+/// 
+/// This struct encapsulates the entire lifecycle of a Unity asset database refresh,
+/// including the refresh itself and any subsequent compilation that may occur.
+/// It provides timeout management, state tracking, and result collection capabilities.
+/// 
+/// The task follows this state flow:
+/// 1. NotStarted -> RefreshSent (when refresh message is sent)
+/// 2. RefreshSent -> RefreshCompleted/Failed (when refresh response is received)
+/// 3. RefreshCompleted -> CompilationStarted (if compilation begins)
+/// 4. CompilationStarted -> Finish (when compilation completes)
+/// 
+/// Timeouts are enforced at each stage to prevent indefinite waiting.
 pub struct UnityRefreshAssetDatabaseTask {
     operation_start: Instant,
     refresh_start_time: SystemTime,
