@@ -17,11 +17,8 @@
 //!
 //! Unity applications, especially during development and debugging, often generate
 //! high-frequency duplicate log messages (e.g., logs inside Update loops, physics warnings,
-//! or repeated error conditions). The primary motivation for deduplication is **performance**:
-//!
-//! - **Memory Efficiency**: Prevents rapid memory consumption from redundant log entries
-//! - **Processing Performance**: Reduces overhead of storing and managing duplicate data
-//! - **Cache Locality**: Maintains better memory access patterns with fewer entries
+//! or repeated error conditions). 
+//! This prevents frequent repeating log entries to occupy too much of our log capacity, allowing other logs to be stored for longer time.
 
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, SystemTime};
@@ -208,26 +205,6 @@ impl UnityLogManager {
         // Reverse to get chronological order (oldest first)
         matching_logs.reverse();
         matching_logs
-    }
-
-    /// Get logs filtered by level
-    /// Optimized to avoid unnecessary cloning when possible
-    pub fn get_logs_by_level(&self, level: LogLevel) -> Vec<UnityLogEntry> {
-        self.logs
-            .iter()
-            .filter(|log| log.level == level)
-            .cloned()
-            .collect()
-    }
-
-    /// Get logs containing a specific substring
-    /// Optimized to avoid unnecessary cloning when possible
-    pub fn get_logs_containing(&self, pattern: &str) -> Vec<UnityLogEntry> {
-        self.logs
-            .iter()
-            .filter(|log| log.message.contains(pattern))
-            .cloned()
-            .collect()
     }
 }
 
