@@ -18,6 +18,23 @@ const COMPILATION_FINISH_TIMEOUT_SECS: u64 = 60;
 /// Wait time in seconds after compilation finishes for logs to arrive
 const POST_COMPILATION_WAIT_SECS: u64 = 1;
 
+/// States of the refresh task
+#[derive(Debug, Clone, PartialEq)]
+enum RefreshState {
+    /// Task has been created but not started
+    NotStarted,
+    /// Refresh message has been sent, waiting for response
+    RefreshSent,
+    /// Refresh completed, waiting for compilation to start
+    RefreshCompleted,
+    /// Compilation has started
+    CompilationStarted,
+    /// Task is complete
+    Finish,
+    /// Task failed or timed out
+    Failed,
+}
+
 /// Result of a refresh operation
 #[derive(Debug, Clone)]
 pub struct RefreshResult {
@@ -39,10 +56,10 @@ pub struct RefreshResult {
 pub struct UnityRefreshAssetDatabaseTask {
     operation_start: Instant,
     refresh_start_time: SystemTime,
-    refresh_completed: bool,
-    compilation_started: bool,
-    compilation_finished: bool,
+    state: RefreshState,
     error_message: Option<String>,
+    // Whether compilation occured during refresh
+    is_compile: bool,
 }
 
 impl UnityRefreshAssetDatabaseTask {
@@ -50,33 +67,55 @@ impl UnityRefreshAssetDatabaseTask {
     pub fn new() -> Self {
         Self {
             operation_start: Instant::now(),
-            refresh_start_time: SystemTime::now(),
-            refresh_completed: false,
-            compilation_started: false,
-            compilation_finished: false,
+            refresh_start_time: SystemTime::UNIX_EPOCH,
+            state: RefreshState::NotStarted,
             error_message: None,
+            is_compile: false,
         }
     }
 
     /// Mark the refresh as started
-    pub fn mark_refresh_started(&mut self) {
+    pub fn mark_refresh_started(&mut self) -> Result<(), String> {
+        if self.state != RefreshState::NotStarted {
+            return Err(format!("Cannot start refresh from state {:?}", self.state));
+        }
+        self.state = RefreshState::RefreshSent;
         self.refresh_start_time = SystemTime::now();
+        Ok(())
     }
 
     /// Mark the refresh as completed
-    pub fn mark_refresh_completed(&mut self, success: bool, error_message: Option<String>) {
-        self.refresh_completed = success;
-        self.error_message = error_message;
+    pub fn mark_refresh_completed(&mut self, success: bool, error_message: Option<String>) -> Result<(), String> {
+        if self.state != RefreshState::RefreshSent {
+            return Err(format!("Cannot complete refresh from state {:?}", self.state));
+        }
+        
+        if success {
+            self.state = RefreshState::RefreshCompleted;
+        } else {
+            self.state = RefreshState::Failed;
+            self.error_message = error_message;
+        }
+        Ok(())
     }
 
     /// Mark compilation as started
-    pub fn mark_compilation_started(&mut self) {
-        self.compilation_started = true;
+    pub fn mark_compilation_started(&mut self) -> Result<(), String> {
+        if self.state != RefreshState::RefreshCompleted {
+            return Err(format!("Cannot start compilation from state {:?}", self.state));
+        }
+        self.state = RefreshState::CompilationStarted;
+        self.is_compile = true;
+        Ok(())
     }
 
     /// Mark compilation as finished
-    pub fn mark_compilation_finished(&mut self) {
-        self.compilation_finished = true;
+    pub fn mark_compilation_finished(&mut self) -> Result<(), String> {
+        if self.state != RefreshState::CompilationStarted {
+            return Err(format!("Cannot finish compilation from state {:?}", self.state));
+        }
+        self.state = RefreshState::Finish;
+        Ok(())
     }
 
     /// Build the refresh result
@@ -88,16 +127,14 @@ impl UnityRefreshAssetDatabaseTask {
         let duration = self.operation_start.elapsed().as_secs_f64();
 
         RefreshResult {
-            refresh_completed: self.refresh_completed && self.error_message.is_none(),
+            refresh_completed: matches!(self.state, RefreshState::RefreshCompleted | RefreshState::CompilationStarted | RefreshState::Finish),
             refresh_error_message: self.error_message.clone(),
-            compilation_started: self.compilation_started,
-            compilation_completed: self.compilation_finished,
+            compilation_started: self.is_compile,
+            compilation_completed: self.is_compile && self.state == RefreshState::Finish,
             problems: logs,
             duration_seconds: duration,
         }
     }
-
-
 
     /// Collect relevant logs during refresh
     fn collect_refresh_logs(
@@ -124,7 +161,7 @@ impl UnityRefreshAssetDatabaseTask {
 
     /// Check if the task has completed
     pub fn is_completed(&self) -> bool {
-        self.refresh_completed && (!self.compilation_started || self.compilation_finished)
+        matches!(self.state, RefreshState::Finish | RefreshState::Failed)
     }
 
     /// Get the current duration of the operation
@@ -134,11 +171,59 @@ impl UnityRefreshAssetDatabaseTask {
 
     /// Check if refresh was successful
     pub fn is_successful(&self) -> bool {
-        self.refresh_completed && self.error_message.is_none()
+        (self.state == RefreshState::Finish || self.state == RefreshState::RefreshCompleted) && self.error_message.is_none()
     }
 
     /// Get the refresh start time
     pub fn refresh_start_time(&self) -> SystemTime {
         self.refresh_start_time
+    }
+
+    /// Check if compilation has started
+    pub fn has_compilation(&self) -> bool {
+        self.is_compile
+    }
+
+    /// Update the task state and check for timeout
+    /// 
+    /// Returns `Ok(())` if no timeout occured, or an `Err` with a timeout message if the task timed out.
+    pub fn update(&mut self) -> Result<(), String> {
+        if self.is_completed() {
+            return Ok(());
+        }
+        
+        let elapsed = self.duration();
+        let timeout_message = match self.state {
+            RefreshState::RefreshSent => {
+                if elapsed > Duration::from_secs(REFRESH_TOTAL_TIMEOUT_SECS) {
+                    Some(format!("Refresh operation timed out after {} seconds", REFRESH_TOTAL_TIMEOUT_SECS))
+                } else {
+                    None
+                }
+            }
+            RefreshState::RefreshCompleted => {
+                if elapsed > Duration::from_millis(COMPILATION_WAIT_TIMEOUT_MILLIS) {
+                    // No compilation events, mark as finished
+                    self.state = RefreshState::Finish;
+                }
+                None
+            }
+            RefreshState::CompilationStarted => {
+                if elapsed > Duration::from_secs(COMPILATION_FINISH_TIMEOUT_SECS) {
+                    Some(format!("Compilation timed out after {} seconds", COMPILATION_FINISH_TIMEOUT_SECS))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        
+        if let Some(message) = timeout_message {
+            self.state = RefreshState::Failed;
+            self.error_message = Some(message.clone());
+            Err(message)
+        } else {
+            Ok(())
+        }
     }
 }

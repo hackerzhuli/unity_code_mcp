@@ -3,13 +3,13 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::broadcast;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 
 use crate::unity_log_manager::{UnityLogEntry, UnityLogManager};
 use crate::unity_log_utils::{self, extract_main_message};
 use crate::unity_messaging_client::UnityMessagingClient;
 use crate::unity_project_manager::{UnityProjectError, UnityProjectManager};
-use crate::unity_refresh_task::{UnityRefreshAssetDatabaseTask, RefreshResult};
+use crate::unity_refresh_task::{RefreshResult, UnityRefreshAssetDatabaseTask};
 use crate::{debug_log, error_log, info_log, warn_log};
 
 // Timing constants for refresh operations
@@ -262,10 +262,7 @@ impl UnityManager {
                                 // only errors and warnings because we never use info logs anyway
                                 if level == LogLevel::Error || level == LogLevel::Warning {
                                     if let Ok(mut log_manager_guard) = log_manager.lock() {
-                                        log_manager_guard.add_log(
-                                            level.clone(),
-                                            message.clone()
-                                        );
+                                        log_manager_guard.add_log(level.clone(), message.clone());
                                     }
                                 }
                             }
@@ -725,36 +722,45 @@ impl UnityManager {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             debug_log!("Refresh message sent");
-            
+
             // Mark refresh as started
-            refresh_task.mark_refresh_started();
+            if let Err(e) = refresh_task.mark_refresh_started() {
+                return Err(format!("Failed to start refresh task: {}", e).into());
+            }
 
             let timeout_duration = Duration::from_secs(REFRESH_TOTAL_TIMEOUT_SECS);
             let start_time = std::time::Instant::now();
 
             // Wait for refresh response first
             while start_time.elapsed() < timeout_duration && !refresh_task.is_completed() {
-                match timeout(Duration::from_secs(10), event_receiver.recv()).await {
+                match timeout(Duration::from_secs(5), event_receiver.recv()).await {
                     Ok(Ok(event)) => {
                         match event {
                             UnityEvent::RefreshCompleted(message) => {
                                 debug_log!("Refresh completed with message: '{}'", message);
                                 let success = message.is_empty();
-                                let error_msg = if message.is_empty() { None } else { Some(message) };
-                                refresh_task.mark_refresh_completed(success, error_msg.clone());
-                                
-                                if !success {
-                                    error_log!("Refresh failed: {}", error_msg.as_ref().unwrap());
-                                    return Ok(refresh_task.build_result(&self.log_manager));
+                                let error_msg = if message.is_empty() {
+                                    None
+                                } else {
+                                    Some(message)
+                                };
+                                if let Err(e) =
+                                    refresh_task.mark_refresh_completed(success, error_msg.clone())
+                                {
+                                    warn_log!("Failed to mark refresh completed: {}", e).into()
                                 }
                             }
                             UnityEvent::CompilationStarted => {
                                 debug_log!("Compilation started");
-                                refresh_task.mark_compilation_started();
+                                if let Err(e) = refresh_task.mark_compilation_started() {
+                                    warn_log!("Failed to mark compilation started: {}", e);
+                                }
                             }
                             UnityEvent::CompilationFinished => {
                                 debug_log!("Compilation finished");
-                                refresh_task.mark_compilation_finished();
+                                if let Err(e) = refresh_task.mark_compilation_finished() {
+                                    warn_log!("Failed to mark compilation finished: {}", e);
+                                }
                             }
                             _ => {
                                 // Ignore other events
@@ -762,43 +768,30 @@ impl UnityManager {
                         }
                     }
                     Ok(Err(_)) => {
-                        return Err("Event channel closed during refresh".into());
+                        // event channel stopped, Unity Editor process is likely shutdown
+                        return Err("Event channel closed during refresh. Hint: Unity Editor process shuts down unexpectedly, it could have crashed or been killed by user.".into());
                     }
                     Err(_) => {
-                        // Timeout on individual event - continue waiting
                     }
+                }
+
+                refresh_task.update();
+                if refresh_task.is_completed() {
+                    break;
                 }
             }
 
-            // Check for timeout
-            if start_time.elapsed() >= timeout_duration {
-                let error_msg = Some("Timeout waiting for refresh to complete".to_string());
-                refresh_task.mark_refresh_completed(false, error_msg);
-            }
-
             // Wait additional time for error logs to arrive after compilation finishes
-            if refresh_task.is_successful() {
-                debug_log!(
-                    "Waiting {} second(s) for error logs after refresh completed",
-                    POST_COMPILATION_WAIT_SECS
-                );
-                tokio::time::sleep(Duration::from_secs(POST_COMPILATION_WAIT_SECS)).await;
+            if refresh_task.is_successful() && refresh_task.has_compilation() {
+                sleep(Duration::from_secs(POST_COMPILATION_WAIT_SECS)).await;
             }
 
             let result = refresh_task.build_result(&self.log_manager);
-            debug_log!(
-                "Refresh completed, collected {} error logs in {:.2} seconds",
-                result.problems.len(),
-                result.duration_seconds
-            );
-
             Ok(result)
         } else {
             Err(MESSAGING_CLIENT_NOT_INIT_ERROR.into())
         }
     }
-
-    // collect_refresh_logs method moved to UnityRefreshAssetDatabaseTask
 
     /// Stop the messaging client and cleanup
     pub async fn shutdown(&mut self) {
