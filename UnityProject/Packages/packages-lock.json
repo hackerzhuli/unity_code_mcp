@@ -9,7 +9,7 @@
         "com.unity.nuget.newtonsoft-json": "3.2.1",
         "com.unity.nuget.mono-cecil": "1.11.4"
       },
-      "hash": "c9fbe32befd13917ef18ce3183ea15f5d1adb086"
+      "hash": "8e0c7a5f98a09e19615f803c1662e3be95415d6b"
     },
     "com.unity.burst": {
       "version": "1.8.21",
