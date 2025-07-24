@@ -246,11 +246,17 @@ impl UnityMessagingClient {
                                                          *test_run_id = Some(first_adaptor.id.clone());
                                                      }
                                                  }
-                                             }
-                                            UnityEvent::TestRunFinished(_) => {
+                                            }
+                                            UnityEvent::TestRunFinished(container) => {
                                                 if let Ok(mut test_run_id) = current_test_run_id.lock() {
-                                                    *test_run_id = None;
-                                                }
+                                                     if let Some(first_adaptor) = container.test_result_adaptors.first() {
+                                                        if let Ok(mut test_run_id) = current_test_run_id.lock() {
+                                                            if *test_run_id == Some(first_adaptor.test_id.clone()) {
+                                                                *test_run_id = None;
+                                                            }
+                                                        }
+                                                     }
+                                                 }
                                             }
                                             UnityEvent::IsPlaying(is_playing) => {
                                                 if let Ok(mut play_mode) = is_in_play_mode.lock() {
@@ -537,7 +543,11 @@ impl UnityMessagingClient {
     ///
     /// Returns `true` if Unity is currently running tests, `false` otherwise
     pub fn is_running_tests(&self) -> bool {
-        self.current_test_run_id.lock().ok().is_some()
+        if let Ok(test_run_id) = self.current_test_run_id.lock() {
+            test_run_id.is_some()
+        } else {
+            false
+        }
     }
 
     /// Checks if Unity is currently in play mode
@@ -546,7 +556,11 @@ impl UnityMessagingClient {
     ///
     /// Returns `true` if Unity is in play mode, `false` otherwise
     pub fn is_in_play_mode(&self) -> bool {
-        self.is_in_play_mode.lock().ok().map(|guard| *guard).unwrap_or(false)
+        if let Ok(play_mode) = self.is_in_play_mode.lock() {
+            *play_mode
+        } else {
+            false
+        }
     }
 }
 
