@@ -108,14 +108,8 @@ impl UnityLogManager {
         }
     }
 
-    /// Get all collected logs
-    /// Returns a reference to avoid cloning for read-only access
-    pub fn get_logs(&self) -> &VecDeque<UnityLogEntry> {
-        &self.logs
-    }
-
     /// Get all collected logs as Vec (for compatibility)
-    pub fn get_logs_vec(&self) -> Vec<UnityLogEntry> {
+    fn get_logs_vec(&self) -> Vec<UnityLogEntry> {
         self.logs.iter().cloned().collect()
     }
 

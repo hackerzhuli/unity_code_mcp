@@ -1,6 +1,7 @@
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
 
+use crate::logging::init_logging;
 use crate::test_utils::{cleanup_test_uss_file, create_test_uss_file, get_unity_project_path, create_test_cs_script_with_errors, cleanup_test_cs_script_with_errors};
 use crate::unity_manager::UnityManager;
 use crate::unity_messages::{LogLevel, TestFilter, TestMode};
@@ -256,6 +257,22 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
     
     // Call the refresh method which should trigger compilation and collect error logs
     let refresh_result = manager.refresh_asset_database().await;
+
+    // Wait for a short duration to allow receive the compilation errors
+    sleep(Duration::from_secs(2));
+    
+    // Check compile errors after first refresh
+    let errors_after_first = manager.get_last_compile_errors();
+    println!("Compile errors after first refresh: {:?}", errors_after_first);
+    
+    // Add an additional refresh before cleanup to test that it can still receive compilation errors
+    let previous_errors = manager.get_last_compile_errors();
+    println!("Previous compile errors before middle refresh: {:?}", previous_errors);
+    let refresh_result_middle = manager.refresh_asset_database().await;
+    
+    // Check compile errors after middle refresh
+    let errors_after_middle = manager.get_last_compile_errors();
+    println!("Compile errors after middle refresh: {:?}", errors_after_middle);
     
     // Clean up the test file immediately after refresh
     cleanup_test_cs_script_with_errors(&cs_path);
@@ -303,6 +320,29 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
         },
         Err(e) => {
             println!("⚠ Refresh method failed: {}", e);
+            // Don't fail the test if Unity is not available or has issues
+            return;
+        }
+    }
+
+    // Verify the middle refresh result also received compilation errors
+    match refresh_result_middle {
+        Ok(result) => {
+            println!("✓ Middle refresh method completed successfully");
+            println!("Middle refresh completed: {}", result.success);
+            println!("Middle compilation occurred: {}", result.compiled);
+            println!("Middle collected {} error logs during refresh", result.problems.len());
+            
+            // Verify middle refresh completed successfully
+            assert!(result.success, "Middle refresh should have completed successfully");
+            
+            // Verify we still received compilation error logs from previous compile
+            assert!(!result.problems.is_empty(), "Middle refresh should still receive compilation error logs from previous compile");
+            
+            println!("✓ Middle refresh received {} compilation-related error logs from previous compile", result.problems.len());
+        },
+        Err(e) => {
+            println!("⚠ Middle refresh method failed: {}", e);
             // Don't fail the test if Unity is not available or has issues
             return;
         }

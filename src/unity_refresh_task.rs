@@ -138,8 +138,15 @@ impl UnityRefreshAssetDatabaseTask {
     pub fn build_result(
         &self,
         log_manager: &std::sync::Arc<std::sync::Mutex<UnityLogManager>>,
+        previous_compile_errors: &[String],
     ) -> RefreshResult {
-        let logs = self.collect_refresh_logs(log_manager);
+        let mut logs = self.collect_refresh_logs(log_manager);
+        
+        // If no compilation occurred during this refresh, include previous compile errors
+        if !self.is_compile && !previous_compile_errors.is_empty() {
+            logs.extend_from_slice(previous_compile_errors);
+        }
+        
         let duration = self.operation_start.elapsed().as_secs_f64();
 
         RefreshResult {

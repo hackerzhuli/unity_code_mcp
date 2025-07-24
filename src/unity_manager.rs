@@ -205,6 +205,7 @@ impl UnityManager {
         let log_manager = self.log_manager.clone();
         let last_compilation_finished = Arc::clone(&self.last_compilation_finished);
         let last_compile_errors = Arc::clone(&self.last_compile_errors);
+        debug_log!("Background event handling task started");
 
         tokio::spawn(async move {
             //println!("[DEBUG] Log collection task started");
@@ -217,7 +218,7 @@ impl UnityManager {
                                 // only errors and warnings because we never use info logs anyway
                                 if level == LogLevel::Error || level == LogLevel::Warning {
                                     if let Ok(mut log_manager_guard) = log_manager.lock() {
-                                        log_manager_guard.add_log(level.clone(), message.clone());
+                                        log_manager_guard.add_log(level, message);
                                     }
                                 }
                             }
@@ -228,28 +229,34 @@ impl UnityManager {
                                 }
                             }
                             UnityEvent::CompilationFinished => {
+                                debug_log!("UnityManager: Compilation finished here");
+                                let compilation_finish_time = SystemTime::now();
                                 // Record compilation finished timestamp
                                 if let Ok(mut compilation_guard) = last_compilation_finished.lock()
                                 {
-                                    *compilation_guard = Some(SystemTime::now());
+                                    *compilation_guard = Some(compilation_finish_time);
                                 }
 
-                                // Collect compile errors from logs
-                                if let Ok(log_manager_guard) = log_manager.lock() {
-                                    if let Ok(mut compile_errors_guard) = last_compile_errors.lock()
-                                    {
-                                        let logs = log_manager_guard.get_logs();
-                                        for log_entry in logs {
-                                            if log_entry.level == LogLevel::Error {
+                                // Wait 1 second for logs to arrive after compilation finish event
+                                let log_manager_clone = log_manager.clone();
+                                let last_compile_errors_clone = last_compile_errors.clone();
+                                tokio::spawn(async move {
+                                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                                    
+                                    // Collect compile errors from logs
+                                    if let Ok(log_manager_guard) = log_manager_clone.lock() {
+                                        if let Ok(mut compile_errors_guard) = last_compile_errors_clone.lock()
+                                        {
+                                            let logs = log_manager_guard.get_recent_logs(compilation_finish_time, Some(LogLevel::Error), Some("error CS"));
+                                            for log_entry in logs {
                                                 let main_message =
                                                     extract_main_message(&log_entry.message);
                                                 compile_errors_guard.push(main_message);
                                             }
+                                            debug_log!("Compilation finished - collected {} compile errors after 1s delay: {:?}", compile_errors_guard.len(), compile_errors_guard);
                                         }
                                     }
-                                }
-
-                                debug_log!("Compilation finished");
+                                });
                             }
                             _ => {}
                         }
@@ -267,10 +274,10 @@ impl UnityManager {
         });
     }
 
-    /// Get all collected logs
+    /// Get recent logs
     pub fn get_logs(&self) -> Vec<UnityLogEntry> {
         if let Ok(log_manager_guard) = self.log_manager.lock() {
-            log_manager_guard.get_logs_vec()
+            log_manager_guard.get_recent_logs(SystemTime::now() - Duration::from_secs(60), None, None)
         } else {
             Vec::new()
         }
@@ -677,7 +684,8 @@ impl UnityManager {
                 sleep(Duration::from_secs_f64(POST_COMPILATION_WAIT_SECS)).await;
             }
 
-            let result = refresh_task.build_result(&self.log_manager);
+            let previous_compile_errors = self.get_last_compile_errors();
+            let result = refresh_task.build_result(&self.log_manager, &previous_compile_errors);
             Ok(result)
         } else {
             Err(MESSAGING_CLIENT_NOT_INIT_ERROR.into())

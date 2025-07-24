@@ -37,7 +37,7 @@ fn test_successful_refresh_without_compilation() {
     assert!(task.is_successful());
     assert!(!task.has_compilation());
 
-    let result = task.build_result(&log_manager);
+    let result = task.build_result(&log_manager, &Vec::new());
     assert!(result.success);
     assert!(result.refresh_error_message.is_none());
     assert!(!result.compiled);
@@ -64,7 +64,7 @@ fn test_successful_refresh_with_compilation() {
     assert!(task.is_completed());
     assert!(task.is_successful());
 
-    let result = task.build_result(&log_manager);
+    let result = task.build_result(&log_manager, &Vec::new());
     assert!(result.success);
     assert!(result.refresh_error_message.is_none());
     assert!(result.compiled);
@@ -90,7 +90,7 @@ fn test_refresh_timeout() {
     assert!(task.is_completed());
     assert!(!task.is_successful());
 
-    let result = task.build_result(&log_manager);
+    let result = task.build_result(&log_manager, &Vec::new());
     assert!(!result.success);
     assert!(result.refresh_error_message.is_some());
     assert!(!result.compiled);
@@ -114,7 +114,7 @@ fn test_compilation_timeout() {
     assert!(task.is_completed());
     assert!(!task.is_successful());
 
-    let result = task.build_result(&log_manager);
+    let result = task.build_result(&log_manager, &Vec::new());
     assert!(!result.success);
     assert!(!result.compiled);
 }
@@ -136,7 +136,7 @@ fn test_refresh_failure() {
     assert!(task.is_completed());
     assert!(!task.is_successful());
 
-    let result = task.build_result(&log_manager);
+    let result = task.build_result(&log_manager, &Vec::new());
     assert!(!result.success);
     assert_eq!(result.refresh_error_message, Some(error_msg.to_string()));
     assert!(!result.compiled);
@@ -190,7 +190,7 @@ fn test_log_collection() {
     // Complete refresh
     assert!(task.mark_refresh_completed(true, None).is_ok());
 
-    let result = task.build_result(&log_manager);
+    let result = task.build_result(&log_manager, &Vec::new());
     assert_eq!(result.problems.len(), 2); // Only error and warning, not CS warning or info
     assert!(
         result
@@ -224,7 +224,7 @@ fn test_duration_tracking() {
     assert!(task.mark_refresh_started().is_ok());
     assert!(task.mark_refresh_completed(true, None).is_ok());
 
-    let result = task.build_result(&log_manager);
+    let result = task.build_result(&log_manager, &Vec::new());
     assert!(result.duration_seconds > 0.0);
 }
 
@@ -260,7 +260,7 @@ fn test_compilation_wait_timeout_auto_finish() {
     assert!(task.is_successful());
     assert!(!task.has_compilation());
 
-    let result = task.build_result(&log_manager);
+    let result = task.build_result(&log_manager, &Vec::new());
     assert!(result.success);
     assert!(!result.compiled);
 }
