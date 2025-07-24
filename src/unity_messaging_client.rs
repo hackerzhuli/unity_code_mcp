@@ -31,6 +31,8 @@ pub struct UnityMessagingClient {
     last_compilation_finished: Arc<Mutex<Option<SystemTime>>>,
     /// Compile errors collected after compilation finishes
     last_compile_errors: Arc<Mutex<Vec<String>>>,
+    /// Whether we have received the first message from Unity (used to trigger initial GetCompileErrors)
+    first_message_received: Arc<Mutex<bool>>,
 }
 
 impl UnityMessagingClient {
@@ -66,6 +68,7 @@ impl UnityMessagingClient {
             is_in_play_mode: Arc::new(Mutex::new(false)),
             last_compilation_finished: Arc::new(Mutex::new(None)),
             last_compile_errors: Arc::new(Mutex::new(Vec::new())),
+            first_message_received: Arc::new(Mutex::new(false)),
         })
     }
 
@@ -91,8 +94,7 @@ impl UnityMessagingClient {
         let is_online = self.is_online.clone();
         let current_test_run_id = self.current_test_run_id.clone();
         let is_in_play_mode = self.is_in_play_mode.clone();
-        let last_compilation_finished = self.last_compilation_finished.clone();
-        let last_compile_errors = self.last_compile_errors.clone();
+        let first_message_received = self.first_message_received.clone();
 
         // Spawn background task for message listening
         let task = tokio::spawn(async move {
@@ -103,7 +105,8 @@ impl UnityMessagingClient {
                 last_response_time,
                 is_online,
                 current_test_run_id,
-                is_in_play_mode
+                is_in_play_mode,
+                first_message_received
             )
             .await;
         });
@@ -163,6 +166,7 @@ impl UnityMessagingClient {
         is_online: Arc<Mutex<bool>>,
         current_test_run_id: Arc<Mutex<Option<String>>>,
         is_in_play_mode: Arc<Mutex<bool>>,
+        first_message_received: Arc<Mutex<bool>>,
     ) {
         let mut buffer = [0u8; 8192];
         let mut ping_interval = tokio::time::interval(Duration::from_secs(1));
@@ -194,6 +198,24 @@ impl UnityMessagingClient {
                                 // Special logging for log messages
                                 if matches!(message.message_type, MessageType::Info | MessageType::Warning | MessageType::Error) {
                                     info_log!("Unity {:?}: {}", message.message_type, message.value);
+                                }
+
+                                let mut just_received_first_message = false;
+                                // Check if this is the first message from Unity (excluding Ping/Pong)
+                                if let Ok(mut first_received) = first_message_received.lock() {
+                                    if !*first_received {
+                                        *first_received = true;
+                                        debug_log!("First message received from Unity, requesting initial compile errors");
+                                        just_received_first_message = true;
+                                    }
+                                }
+                                
+                                if just_received_first_message {
+                                    // Send GetCompileErrors request to get initial compile errors
+                                    let get_compile_errors_message = Message::new(MessageType::GetCompileErrors, String::new());
+                                    if let Err(e) = socket.send_to(&get_compile_errors_message.serialize(), unity_address).await {
+                                        error_log!("Failed to send initial GetCompileErrors request: {}", e);
+                                    }
                                 }
 
                                 // Update last response time for any valid message

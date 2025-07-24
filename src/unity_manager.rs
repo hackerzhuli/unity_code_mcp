@@ -258,6 +258,26 @@ impl UnityManager {
                                     }
                                 });
                             }
+                            UnityEvent::CompileErrors(log_container) => {
+                                // Handle initial compile errors from Unity
+                                // If we never received compile finish events
+                                // then this is the initial compile errors before we connect to Unity
+                                if let Ok(mut last_compilation_finished_guard) = last_compilation_finished.lock() {
+                                    if last_compilation_finished_guard.is_none() {
+                                        if let Ok(mut compile_errors_guard) = last_compile_errors.lock() {
+                                            compile_errors_guard.clear();
+                                            for log in &log_container.logs {
+                                                let main_message = extract_main_message(&log.message);
+                                                compile_errors_guard.push(main_message);
+                                            }
+                                            debug_log!("Initial compile errors received from Unity: {} errors", compile_errors_guard.len());
+                                        }
+
+                                        // compile didn't happen just now, but we can use now as a fake compile time, it's ok
+                                        *last_compilation_finished_guard = Some(SystemTime::now());
+                                    }
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -296,15 +316,6 @@ impl UnityManager {
             log_manager_guard.log_count()
         } else {
             0
-        }
-    }
-
-    /// Get the timestamp of the last compilation finished event
-    pub fn get_last_compilation_finished(&self) -> Option<SystemTime> {
-        if let Ok(compilation_guard) = self.last_compilation_finished.lock() {
-            *compilation_guard
-        } else {
-            None
         }
     }
 
