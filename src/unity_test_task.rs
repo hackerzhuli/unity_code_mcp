@@ -361,15 +361,6 @@ impl UnityTestExecutionTask {
             test_count = root_adaptor.test_count;
         }
 
-        // Count non-finished tests as failed if task is not successfully completed
-        if !self.is_successful() {
-            for test_state in self.test_states.values() {
-                if !test_state.adaptor.has_children && test_state.finish_time.is_none() {
-                    fail_count += 1;
-                }
-            }
-        }
-
         // Estimate duration by finding the first test start time
         let mut first_test_start_time: Option<Instant> = None;
         for test_state in self.test_states.values() {

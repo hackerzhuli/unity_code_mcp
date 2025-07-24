@@ -278,9 +278,9 @@ fn test_build_result_and_finish_with_error() {
     assert!(!error_result.execution_completed);
     assert_eq!(error_result.error_message, "Test execution failed");
     assert_eq!(error_result.pass_count, 1);
-    assert_eq!(error_result.fail_count, 2); // 1 failed + 1 unfinished
+    assert_eq!(error_result.fail_count, 1);
     assert_eq!(error_result.test_count, 3);
-    assert_eq!(error_result.skip_count, 0);
+    assert_eq!(error_result.skip_count, 1);
     assert_eq!(error_result.test_results.len(), 2);
     
     // Test that finish_with_error fails when already finished
