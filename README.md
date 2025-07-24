@@ -5,16 +5,15 @@ Unity Code MCP is a coding focused Model Context Protocol (MCP) server that enab
 
 ## 🎯 Why Unity Code MCP?
 
-Unity Code MCP is focused on coding. It can handle Unity's compilation cycles gracefully while providing only the essential tools needed for autonomous code development: compilation feedback and test execution.
+Unity Code MCP is a high-performance, coding-focused MCP server built in Rust. It handles Unity's compilation cycles gracefully while providing only the essential tools needed for autonomous code development: compilation feedback and test execution.
 
-Other Unity MCP servers typically fail when Unity is compiling or performing domain reloads, causing AI tool calls to report an error and AI agents confused about what is going on.
-
-This MCP server enables AI agents to develop Unity code autonomously, write code, compile, fix compile errors, test, fix bugs, repeat, just like how a human would.
+This MCP server enables AI agents to develop Unity code autonomously with exceptional speed and reliability - write code, compile, fix compile errors, test, fix bugs, repeat, just like how a human would.
 
 ## ✨ Key Features
 
 - **🤖 Coding-Optimized**: Streamlined tools designed for efficient AI agent coding workflows
-- **⚡ Performance-Focused**: Minimal token usage with essential operations, only returns relevant information
+- **⚡ High Performance**: Built in Rust for exceptional speed, minimal memory usage, and lightning-fast response times
+- **🎯 Efficient Communication**: Minimal token usage with essential operations, only returns relevant information
 - **🧪 Test-Driven**: Comprehensive test execution and reporting capabilities
 - **📦 Self-Contained**: Single binary with no runtime dependencies (no Node.js, Python, or .NET required)
 
@@ -172,5 +171,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [Visual Studio Code Editor for Unity](https://github.com/hackerzhuli/com.hackerzhuli.code) - Required Unity package
 - [Model Context Protocol](https://modelcontextprotocol.io/) - The protocol specification
-- [Unity Code Pro VS Code Extension](https://github.com/your-repo/unity-code-pro) - VS Code extension that is related
-
+- [Unity Code Pro VS Code Extension](https://github.com/hackerzhuli/unity-code) - VS Code extension that is related
