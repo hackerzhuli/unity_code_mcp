@@ -223,30 +223,19 @@ impl UnityTestExecutionTask {
     }
 
     /// Handle test run finished event
-    pub fn handle_test_run_finished(&mut self, test_result_adaptors: Vec<crate::unity_messages::TestResultAdaptor>) -> Result<TestExecutionResult, String> {
+    pub fn handle_test_run_finished(&mut self, test_result_adaptors: Vec<crate::unity_messages::TestResultAdaptor>) -> Result<(), String> {
         if self.state != TestExecutionState::TestRunStarted {
             return Err(format!("Cannot handle test run finished from state {:?}", self.state));
         }
         
         self.state = TestExecutionState::Finished;
         
-        // Extract pass/fail counts from parsed data
-        if let Some(adaptor) = test_result_adaptors.first() {
-            let result = TestExecutionResult {
-                pass_count: adaptor.pass_count,
-                fail_count: adaptor.fail_count,
-                skip_count: adaptor.skip_count,
-                duration_seconds: adaptor.duration,
-                test_count: adaptor.pass_count + adaptor.fail_count + adaptor.skip_count,
-                test_results: self.test_results.clone(),
-                execution_completed: true,
-                error_message: String::new(),
-            };
-            
-            Ok(result)
-        } else {
-            Err("No test result adaptors in TestRunFinished".to_string())
+        // Validate that we have test result adaptors
+        if test_result_adaptors.is_empty() {
+            return Err("No test result adaptors in TestRunFinished".to_string());
         }
+        
+        Ok(())
     }
 
     /// Check if the task has completed
@@ -354,8 +343,8 @@ impl UnityTestExecutionTask {
         Ok(())
     }
 
-    /// Create test result with error
-    pub fn create_test_result_with_error(&self, error_message: &str) -> TestExecutionResult {
+    /// Build test execution result based on current state
+    pub fn build_result(&self) -> TestExecutionResult {
         // Count the tests
         let mut pass_count = 0;
         let mut fail_count = 0;
@@ -372,10 +361,12 @@ impl UnityTestExecutionTask {
             test_count = root_adaptor.test_count;
         }
 
-        // Also count non-finished test as failed
-        for test_state in self.test_states.values() {
-            if !test_state.adaptor.has_children && test_state.finish_time.is_none() {
-                fail_count += 1;
+        // Count non-finished tests as failed if task is not successfully completed
+        if !self.is_successful() {
+            for test_state in self.test_states.values() {
+                if !test_state.adaptor.has_children && test_state.finish_time.is_none() {
+                    fail_count += 1;
+                }
             }
         }
 
@@ -395,14 +386,26 @@ impl UnityTestExecutionTask {
 
         TestExecutionResult {
             test_results: self.test_results.clone(),
-            execution_completed: false,
-            error_message: error_message.to_string(),
+            execution_completed: self.is_successful(),
+            error_message: self.error_message.clone().unwrap_or_default(),
             pass_count,
             fail_count,
             duration_seconds,
             test_count,
             skip_count: test_count - pass_count - fail_count,
         }
+    }
+
+    /// Finish the test execution with an error
+    pub fn finish_with_error(&mut self, error_message: &str) -> Result<(), String> {
+        // Can only finish with error if not already finished
+        if self.is_completed() {
+            return Err("Task is already finished".to_string());
+        }
+        
+        self.state = TestExecutionState::Finished;
+        self.error_message = Some(error_message.to_string());
+        Ok(())
     }
 }
 

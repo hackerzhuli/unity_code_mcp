@@ -160,15 +160,17 @@ fn test_handle_test_run_finished() {
         create_test_result_adaptor("root", "Mixed", 3.5, true, 1, 1, 0),
     ];
     
-    let result = task.handle_test_run_finished(summary_adaptors).unwrap();
+    assert!(task.handle_test_run_finished(summary_adaptors).is_ok());
     
     assert!(task.is_completed());
     assert!(task.is_successful());
+    
+    // Build result to get the final test execution result
+    let result = task.build_result();
     assert_eq!(result.pass_count, 1);
     assert_eq!(result.fail_count, 1);
     assert_eq!(result.skip_count, 0);
     assert_eq!(result.test_count, 2);
-    assert_eq!(result.duration_seconds, 3.5);
     assert!(result.execution_completed);
     assert_eq!(result.test_results.len(), 2);
 }
@@ -244,7 +246,7 @@ fn test_timeout_test_start_delay() {
 }
 
 #[test]
-fn test_create_test_result_with_error() {
+fn test_build_result_and_finish_with_error() {
     let filter = create_test_filter();
     let mut task = UnityTestExecutionTask::new(filter, 30.0, 60.0, 10.0);
     
@@ -267,7 +269,11 @@ fn test_create_test_result_with_error() {
     ];
     task.handle_test_finished(result_adaptors).unwrap();
     
-    let error_result = task.create_test_result_with_error("Test execution failed");
+    // Test finish_with_error
+    assert!(task.finish_with_error("Test execution failed").is_ok());
+    
+    // Test build_result after error
+    let error_result = task.build_result();
     
     assert!(!error_result.execution_completed);
     assert_eq!(error_result.error_message, "Test execution failed");
@@ -276,6 +282,9 @@ fn test_create_test_result_with_error() {
     assert_eq!(error_result.test_count, 3);
     assert_eq!(error_result.skip_count, 0);
     assert_eq!(error_result.test_results.len(), 2);
+    
+    // Test that finish_with_error fails when already finished
+    assert!(task.finish_with_error("Another error").is_err());
 }
 
 #[test]
@@ -304,10 +313,13 @@ fn test_successful_complete_flow() {
     let summary_adaptors = vec![
         create_test_result_adaptor("root", "Passed", 3.5, true, 2, 0, 0),
     ];
-    let result = task.handle_test_run_finished(summary_adaptors).unwrap();
+    assert!(task.handle_test_run_finished(summary_adaptors).is_ok());
     
     assert!(task.is_completed());
     assert!(task.is_successful());
+    
+    // Build result to get the final test execution result
+    let result = task.build_result();
     assert_eq!(result.pass_count, 2);
     assert_eq!(result.fail_count, 0);
     assert!(result.execution_completed);

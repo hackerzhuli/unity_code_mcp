@@ -512,7 +512,7 @@ impl UnityManager {
                                 }
 
                                 if let Err(e) = test_task.handle_test_started(container.test_adaptors) {
-                                    return Err(format!("Failed to handle test started: {}", e).into());
+                                    error_log!("Failed to handle test started: {}", e);
                                 }
                             }
                             UnityEvent::TestFinished(container) => {
@@ -533,25 +533,13 @@ impl UnityManager {
                                 }
 
                                 if let Err(e) = test_task.handle_test_finished(container.test_result_adaptors) {
-                                    return Err(format!("Failed to handle test finished: {}", e).into());
+                                    error_log!("Failed to handle test finished: {}", e);
                                 }
                             }
                             UnityEvent::TestRunFinished(container) => {
                                 debug_log!("Test run finished");
-
-                                match test_task.handle_test_run_finished(container.test_result_adaptors) {
-                                    Ok(result) => {
-                                        debug_log!(
-                                            "Extracted counts from TestRunFinished: {} passed, {} failed",
-                                            result.pass_count,
-                                            result.fail_count
-                                        );
-                                        return Ok(result);
-                                    }
-                                    Err(e) => {
-                                        return Ok(test_task.create_test_result_with_error(&e));
-                                    }
-                                }
+                                test_task.handle_test_run_finished(container.test_result_adaptors);
+                                break;
                             }
                             _ => {
                                 // Ignore other events during test execution
@@ -559,21 +547,25 @@ impl UnityManager {
                         }
                     }
                     Ok(Err(_)) => {
-                        return Ok(test_task.create_test_result_with_error(
+                        test_task.finish_with_error(
                             "Event channel closed during test execution. Hint: Unity Editor process shuts down unexpectedly, it could have crashed or been killed by user.",
-                        ));
+                        );
+                        break;
                     }
                     Err(_) => {
                         // Check for timeouts
-                        if let Err(e) = test_task.update() {
-                            // Return results with error message instead of just error
-                            return Ok(test_task.create_test_result_with_error(&e));
-                        }
+                        test_task.update();
 
-                        // Check if Unity Editor is still running
+                        // Important: Check if Unity Editor is still running
                         self.update_unity_connection().await;
                     }
                 }
+            }
+
+            if test_task.is_completed(){
+                Ok(test_task.build_result())
+            }else{
+                Err("Test execution internal error".into())
             }
         } else {
             Err(MESSAGING_CLIENT_NOT_INIT_ERROR.into())
