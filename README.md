@@ -26,10 +26,18 @@ Unity Code MCP provides 2 tools for autonomous code development:
 - Returns compile errors and other non compile warning and errors **only include the logs during the refresh**
 - Handles domain reload gracefully
 
+Asset database refresh tool in action:
+
+![Asset Database Refresh](./assets/mcp_refresh_tool.webp)
+
 ### 2. **Test Execution**
 - Runs Unity tests with comprehensive reporting
 - Provides detailed stack traces and logs for failures
 - Supports both EditMode and PlayMode tests
+
+Test execution tool in action:
+
+![Test Execution](./assets/mcp_test_tool.webp)
 
 ## 🚀 Autonomous AI agent workflow example
 
