@@ -1,15 +1,18 @@
-use crate::unity_messages::{LogLevel, Message, MessageType, TestAdaptorContainer, TestFilter, TestResultAdaptorContainer, UnityEvent, UnityMessagingError};
+use crate::unity_messages::{
+    LogLevel, Message, MessageType, TestAdaptorContainer, TestFilter, TestResultAdaptorContainer,
+    UnityEvent, UnityMessagingError,
+};
 use crate::{debug_log, error_log, info_log};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncReadExt};
+use tokio::io::AsyncReadExt;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
-use std::sync::Mutex;
 
 /// Unity messaging client that communicates via UDP with event broadcasting
 pub struct UnityMessagingClient {
@@ -248,15 +251,13 @@ impl UnityMessagingClient {
                                                  }
                                             }
                                             UnityEvent::TestRunFinished(container) => {
-                                                if let Ok(mut test_run_id) = current_test_run_id.lock() {
-                                                     if let Some(first_adaptor) = container.test_result_adaptors.first() {
-                                                        if let Ok(mut test_run_id) = current_test_run_id.lock() {
-                                                            if *test_run_id == Some(first_adaptor.test_id.clone()) {
-                                                                *test_run_id = None;
-                                                            }
+                                                if let Some(first_adaptor) = container.test_result_adaptors.first() {
+                                                    if let Ok(mut test_run_id) = current_test_run_id.lock() {
+                                                        if *test_run_id == Some(first_adaptor.test_id.clone()) {
+                                                            *test_run_id = None;
                                                         }
-                                                     }
-                                                 }
+                                                    }
+                                                }
                                             }
                                             UnityEvent::IsPlaying(is_playing) => {
                                                 if let Ok(mut play_mode) = is_in_play_mode.lock() {
@@ -265,7 +266,7 @@ impl UnityMessagingClient {
                                             }
                                             _ => {}
                                         }
-                                        
+
                                         if let Err(_) = event_sender.send(event) {
                                             // No receivers, continue listening
                                         }
@@ -400,9 +401,7 @@ impl UnityMessagingClient {
         let data = message.serialize();
         match self.socket.send_to(&data, self.unity_address).await {
             Ok(_) => Ok(()),
-            Err(e) => {
-                Err(e.into())
-            }
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -444,7 +443,10 @@ impl UnityMessagingClient {
             // Wait for Unity to be online
             while !self.is_online() {
                 if start_time.elapsed() >= timeout {
-                    return Err(UnityMessagingError::Timeout(format!("Timeout waiting for Unity Editor to be available after {:?}, Unity Editor is busy compiling scripts, please try again later.", timeout)));
+                    return Err(UnityMessagingError::Timeout(format!(
+                        "Timeout waiting for Unity Editor to be available after {:?}, Unity Editor is busy compiling scripts, please try again later.",
+                        timeout
+                    )));
                 }
 
                 // Sleep for a short time before checking again
@@ -509,10 +511,15 @@ impl UnityMessagingClient {
     /// # Returns
     ///
     /// Returns `Ok(())` if the request was sent successfully
-    pub async fn execute_tests(&self, filter: TestFilter, timeout_seconds: Option<u64>) -> Result<(), UnityMessagingError> {
+    pub async fn execute_tests(
+        &self,
+        filter: TestFilter,
+        timeout_seconds: Option<u64>,
+    ) -> Result<(), UnityMessagingError> {
         let filter_string = filter.to_filter_string();
         let execute_tests_message = Message::new(MessageType::ExecuteTests, filter_string);
-        self.send_message(&execute_tests_message, timeout_seconds).await
+        self.send_message(&execute_tests_message, timeout_seconds)
+            .await
     }
 
     /// Gets the Unity address this client is connected to
