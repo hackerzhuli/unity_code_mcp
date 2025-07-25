@@ -68,6 +68,9 @@ AI: ✅ Complete! Created a fully functional PlayerController with WASD movement
 
 This demonstrates true autonomous development - from user request to fully tested, working Unity code without any human intervention.
 
+AI agent in action, tell Kimi K2 to fix compile errors in Unity project with no context:
+![Kimi K2 fix compile errors](./assets/mcp_fix_compile_errors.webp)
+
 ## 📦 Installation
 
 ### Prerequisites
