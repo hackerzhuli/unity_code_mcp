@@ -47,8 +47,14 @@ fn init_file_logging() {
         return;
     }
 
+    let file_name = if cfg!(debug_assertions) {
+        "unity_code_mcp_debug.log"
+    } else {
+        "unity_code_mcp.log"
+    };
+    
     // Create log file path
-    let log_file = log_dir.join("unity_code_mcp.log");
+    let log_file = log_dir.join(file_name);
 
     // Try to open the log file, but don't panic if it fails
     let target = match fs::OpenOptions::new()

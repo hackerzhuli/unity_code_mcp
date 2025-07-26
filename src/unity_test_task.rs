@@ -206,6 +206,12 @@ impl UnityTestExecutionTask {
 
             // Create SimpleTestResult from TestResultAdaptor
             if let Some(test_state) = self.test_states.get(&adaptor.test_id) {
+                // still need to check the actual test adapator must not have children
+                // sometimes, a result have no children doesn't mean the test doesn't have children
+                // so must check to be sure
+                if test_state.adaptor.has_children {
+                    continue;
+                }
                 let simple_result = SimpleTestResult {
                     full_name: test_state.adaptor.full_name.clone(),
                     error_stack_trace: adaptor.stack_trace.clone(),

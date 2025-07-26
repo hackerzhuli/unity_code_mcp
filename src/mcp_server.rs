@@ -135,24 +135,9 @@ impl UnityCodeMcpServer {
         let test_filter = match filter {
             None => TestFilter::All(mode),
             Some(filter_str) => {
-                if filter_str.ends_with(".dll") {
-                    // Assembly filter
-                    TestFilter::Assembly {
-                        mode,
-                        assembly_name: filter_str,
-                    }
-                } else if filter_str.contains(".") {
-                    // Specific test filter (contains dots, likely a namespace.class.method)
-                    TestFilter::Specific {
-                        mode,
-                        test_name: filter_str,
-                    }
-                } else {
-                    // Custom filter
-                    TestFilter::Custom {
-                        mode,
-                        filter: filter_str,
-                    }
+                TestFilter::Custom {
+                    mode,
+                    filter: format!("{}?", filter_str), // add a question mark for fuzzy matching
                 }
             }
         };
@@ -167,6 +152,9 @@ impl UnityCodeMcpServer {
                     "skipped_test_count": result.skip_count,
                     "total_test_count": result.test_count,
                     "duration_seconds": result.duration_seconds,
+                    "first_50_passed_tests": result.test_results.iter().filter(|test| test.passed).take(50).map(|test| {
+                        test.full_name.clone()
+                    }).collect::<Vec<_>>(),
                     // AI agent only need to care about failed tests, so we filter out passed tests(there can be hundreds of tests, so filter make sense)
                     "failed_tests": result.test_results.iter().filter(|test| !test.passed).map(|test| {
                         let combined_error = if test.error_message.is_empty() && test.error_stack_trace.is_empty() {

@@ -574,6 +574,10 @@ impl UnityManager {
                         // Check for timeouts
                         test_task.update();
 
+                        if test_task.is_completed() {
+                            break;
+                        }
+
                         // Important: Check if Unity Editor is still running
                         self.update_unity_connection().await;
                     }
