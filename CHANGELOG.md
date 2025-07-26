@@ -2,6 +2,12 @@
 
 All notable changes to Unity Code MCP Server will be documented in this file.
 
+## [1.1.2] - 2025-07-25
+
+### Improved
+- Improved run tests to allow `run_tests` filter with an partial name, e.g. just class name without namespace, or just method name, still will find tests to run, but it may run more tests. This is because sometimes e.g. AI agents didn't see the namespace of the test class, so it will try to run tests with the class name.
+- Better `run_tests` tool call result, when no tests are run, now it shows 0 passed, instead of 1 passed. Also, now it shows 50 passes test names, instead of no passed test names. It helps the AI agents to confirm the expected tests were run, also saves tokens when there are too many tests.
+
 ## [1.1.1] - 2025-07-25
 
 ### Improved

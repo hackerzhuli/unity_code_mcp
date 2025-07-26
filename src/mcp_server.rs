@@ -16,7 +16,7 @@ pub struct RunTestsRequest {
     #[schemars(description = "Test mode to run: EditMode or PlayMode")]
     pub test_mode: String,
     #[schemars(
-        description = "Optional filter: namespace (Namespace), class name (Namespace.Class), or specific method name (Namespace.Class.Method), all names must be fully qualified."
+        description = "Optional filter: namespace, class, or method name. It is recommended to use the fully qualified name, e.g. `MyNamespace.MyClass` or `MyNamespace.MyClass.MyMethod` for more accurate test selection."
     )]
     pub filter: Option<String>,
 }
