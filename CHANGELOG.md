@@ -2,11 +2,13 @@
 
 All notable changes to Unity Code MCP Server will be documented in this file.
 
-## [1.1.2] - 2025-07-25
+## [1.1.2] - 2025-07-28
 
 ### Improved
 - Improved run tests to allow `run_tests` filter with an partial name, e.g. just class name without namespace, or just method name, still will find tests to run, but it may run more tests. This is because sometimes e.g. AI agents didn't see the namespace of the test class, so it will try to run tests with the class name.
 - Better `run_tests` tool call result, when no tests are run, now it shows 0 passed, instead of 1 passed. Also, now it shows 50 passed test names, instead of just a passed test count. It helps the AI agents to confirm the expected tests were run, also saves tokens when there are too many tests.
+- Improved `refresh_asset_database` performance when compilation did occur, return faster when we detect related events
+- Improved `refresh_asset_database` reliability for getting compile errors because we wait longer (10 seconds instead of 1) for compilation to start, but this does mean that if compilation didn't occur, our refresh process can take a long time(10 seconds), it's OK because agents typically call this when they have changed scripts, so compilation will occur most of the time
 
 ## [1.1.1] - 2025-07-25
 
