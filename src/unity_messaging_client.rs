@@ -223,19 +223,34 @@ impl UnityMessagingClient {
                                     *time = Some(std::time::Instant::now());
                                 }
 
-                                // Update online state based on message type
+                                // Update online state based on message type and emit state change events
+                                let mut state_changed = false;
+                                let mut new_online_state = false;
                                 match message.message_type {
                                     MessageType::Offline => {
                                         if let Ok(mut online) = is_online.lock() {
-                                            //println!("[CLIENT] Received Offline message, setting state to false (timestamp: {:?})", std::time::Instant::now());
+                                            let was_online = *online;
                                             *online = false;
+                                            new_online_state = false;
+                                            state_changed = was_online != false;
                                         }
                                     }
                                     _ => {
                                         // Any other message from Unity means it's online
                                         if let Ok(mut online) = is_online.lock() {
+                                            let was_online = *online;
                                             *online = true;
+                                            new_online_state = true;
+                                            state_changed = was_online != true;
                                         }
+                                    }
+                                }
+
+                                // Emit online state change event if state changed
+                                if state_changed {
+                                    let state_change_event = UnityEvent::OnlineStateChanged(new_online_state);
+                                    if let Err(_) = event_sender.send(state_change_event) {
+                                        // No receivers, continue listening
                                     }
                                 }
 

@@ -150,6 +150,8 @@ pub enum UnityEvent {
     Online,
     /// Unity went offline
     Offline,
+    /// Unity online/offline state changed
+    OnlineStateChanged(bool),
     /// Unity play mode changed
     IsPlaying(bool),
     /// Compile errors received from Unity
