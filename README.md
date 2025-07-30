@@ -12,7 +12,7 @@ This MCP server enables AI agents to develop Unity code autonomously with except
 ## ✨ Key Features
 
 - **🤖 Coding-Optimized**: Streamlined tools designed for efficient AI agent coding workflows
-- **⚡ High Performance**: Built in Rust for exceptional speed, minimal memory usage, and lightning-fast response times
+- **⚡ Lightweight and High Performance**: Built in Rust for exceptional speed, minimal memory usage, and lightning-fast response times. Uses only 1MB memory when the workspace is not a Unity Project, and only 10MB when it is and Unity Editor is open for the project. Also, the communication with Unity Editor is based on UDP, so it's minimal load for your system.
 - **🎯 Efficient Communication**: Minimal token usage with essential operations, only returns relevant information
 - **🧪 Test-Driven**: Comprehensive test execution and reporting capabilities
 - **📦 Self-Contained**: Single binary with no runtime dependencies (no Node.js, Python, or .NET required)
