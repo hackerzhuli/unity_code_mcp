@@ -93,14 +93,14 @@ cargo build --release
 ### Step 3: Configure Your AI Assistant
 Add the MCP server to your AI assistant configuration:
 
-**For Claude Desktop/Cursor/Trae:**
+**For Cursor/Trae:**
 ```json
 {
   "mcpServers": {
     "unity-code": {
       "command": "/path/to/unity-code-mcp",
       "env": {
-        "UNITY_PROJECT_PATH": "/path/to/your/unity/project"
+        "UNITY_PROJECT_PATH": "${workspaceFolder}"
       }
     }
   }
@@ -112,17 +112,31 @@ Add the MCP server to your AI assistant configuration:
 {
   "mcp.servers": {
     "unity-code": {
-      "command": "/path/to/unity-code-mcp",
-      "args": [],
+      "command": "/path/to/unity_code_mcp",
       "env": {
-        "UNITY_PROJECT_PATH": "/path/to/your/unity/project"
+        "UNITY_PROJECT_PATH": "${workspaceFolder}"
       }
     }
   }
 }
 ```
 
-> **Important**: Use absolute paths for both the binary and Unity project directory.
+**For Claude Desktop:**
+```json
+{
+  "mcpServers": {
+    "unity-code": {
+      "command": "/path/to/unity_code_mcp"
+    }
+  }
+}
+```
+
+> **Note**: The `UNITY_PROJECT_PATH` environment variable is a fallback option. If your IDE supports the MCP `roots` capability, the server will automatically detect Unity projects from the provided workspace roots and prioritize that over the environment variable.
+
+> **Troubleshooting**: If `${workspaceFolder}` doesn't work in your IDE, try using an absolute path instead, e.g., `"UNITY_PROJECT_PATH": "/absolute/path/to/your/unity/project"`. Alternatively, ask your IDE developer to add support for the MCP `roots` capability.
+
+> **Important**: Use absolute paths for the binary command.
 
 ## Platform support
 The code is cross platform, but I can't build or test for other platforms, because I only use Windows. If there are platform specific bugs, you have to fix them yourself.

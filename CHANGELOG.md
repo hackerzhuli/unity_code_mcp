@@ -2,6 +2,17 @@
 
 All notable changes to Unity Code MCP Server will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Dynamic Unity project detection using MCP `roots` capability from client
+- Automatic project path detection from workspace roots when supported by IDE
+- Fallback to `UNITY_PROJECT_PATH` environment variable when `roots` capability is not available
+
+### Improved
+- Enhanced project detection reliability across different IDE environments
+- Better integration with VS Code based IDEs using `${workspaceFolder}` variable
+
 ## [1.1.2] - 2025-07-29
 
 ### Improved

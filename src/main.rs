@@ -31,6 +31,12 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Starting Unity Code MCP Server...");
 
+    // Log all environment variables
+    // info!("Environment Variables:");
+    // for (key, value) in env::vars() {
+    //     info!("  {}: {}", key, value);
+    // }
+
     // Try to get project path from environment variable as fallback
     let fallback_project_path = env::var("UNITY_PROJECT_PATH").ok();
     
