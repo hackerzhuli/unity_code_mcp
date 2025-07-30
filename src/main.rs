@@ -58,8 +58,12 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-            if let Err(e) = server_clone.ensure_unity_manager().await {
-                error!("Failed to ensure Unity manager: {}", e);
+            // Only try to ensure Unity manager if we have a project path
+            // This avoids spamming error logs when no Unity project is configured
+            if server_clone.has_project_path() {
+                if let Err(e) = server_clone.ensure_unity_manager().await {
+                    error!("Failed to ensure Unity manager: {}", e);
+                }
             }
         }
     });

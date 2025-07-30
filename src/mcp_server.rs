@@ -57,6 +57,11 @@ impl UnityCodeMcpServer {
         &self.unity_manager
     }
 
+    /// Check if a Unity project path is available
+    pub fn has_project_path(&self) -> bool {
+        self.project_path.lock().unwrap().is_some()
+    }
+
     /// Get the current project path, resolving it if necessary
     async fn get_project_path(&self) -> Result<String, McpError> {
         let project_path_guard = self.project_path.lock().unwrap();
@@ -278,18 +283,25 @@ impl ServerHandler for UnityCodeMcpServer {
         _request: InitializeRequestParam,
         context: RequestContext<RoleServer>,
     ) -> Result<InitializeResult, McpError> {
-        info!("Client connected, attempting to detect Unity project path...");
+        info!("Client connected, server initialized successfully");
         
-        // Try to detect Unity project from roots eagerly
-        self.try_detect_from_roots_if_needed(&context).await?;
-        
-        // Initialize Unity manager immediately if we have a project path
-        if let Err(e) = self.ensure_unity_manager().await {
-            warn!("Failed to initialize Unity manager during client connection: {}", e);
-        } else {
-            info!("Unity manager initialized successfully");
-        }
-        
+        // Spawn background task to eagerly detect Unity project from roots
+        // This runs in parallel without blocking initialization
+        let server_clone = self.clone();
+        let context_clone = context.clone();
+        tokio::spawn(async move {
+            if let Err(e) = server_clone.try_detect_from_roots_if_needed(&context_clone).await {
+                warn!("Failed to detect Unity project from roots: {}", e);
+            }
+            
+            // Try to initialize Unity manager after detection
+            if let Err(e) = server_clone.ensure_unity_manager().await {
+                warn!("Failed to initialize Unity manager after roots detection: {}", e);
+            } else {
+                info!("Unity manager initialized successfully after roots detection");
+            }
+        });
+
         Ok(InitializeResult {
             protocol_version: ProtocolVersion::V_2024_11_05,
             capabilities: ServerCapabilities::builder()
