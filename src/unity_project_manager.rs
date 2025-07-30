@@ -76,21 +76,31 @@ impl UnityProjectManager {
         Ok(manager)
     }
 
+    /// Checks if the given path is a valid Unity project (static method).
+    ///
+    /// A valid Unity project must contain:
+    /// - `ProjectSettings/ProjectVersion.txt` file
+    /// - `Assets/` directory
+    /// - `Packages/` directory
+    pub fn is_unity_project_path(project_path: &str) -> bool {
+        let path = PathBuf::from(project_path);
+        let project_version_path = path.join("ProjectSettings").join("ProjectVersion.txt");
+        let assets_path = path.join("Assets");
+        let packages_path = path.join("Packages");
+
+        project_version_path.try_exists().unwrap_or(false) && 
+        assets_path.try_exists().unwrap_or(false) && 
+        packages_path.try_exists().unwrap_or(false)
+    }
+
     /// Checks if the configured path is a valid Unity project.
     ///
     /// A valid Unity project must contain:
     /// - `ProjectSettings/ProjectVersion.txt` file
     /// - `Assets/` directory
     /// - `Packages/` directory
-    fn is_unity_project(&self) -> bool {
-        let project_version_path = self
-            .project_path
-            .join("ProjectSettings")
-            .join("ProjectVersion.txt");
-        let assets_path = self.project_path.join("Assets");
-        let packages_path = self.project_path.join("Packages");
-
-        project_version_path.exists() && assets_path.exists() && packages_path.exists()
+    pub fn is_unity_project(&self) -> bool {
+        Self::is_unity_project_path(&self.project_path.to_string_lossy())
     }
 
     /// Loads the Unity Editor version from the project's ProjectVersion.txt file.
@@ -167,7 +177,7 @@ impl UnityProjectManager {
             .join("Library")
             .join("EditorInstance.json");
 
-        if !editor_instance_path.exists() {
+        if !editor_instance_path.try_exists().unwrap_or(false) {
             self.unity_process_id = None;
             return Err(UnityProjectError::ProcessNotFound);
         }
@@ -264,6 +274,28 @@ mod tests {
         let manager = result.unwrap();
         assert!(manager.unity_version().is_some());
         assert!(manager.unity_process_id().is_none()); // Should be None initially
+    }
+
+    #[test]
+    fn test_is_unity_project_path() {
+        // Test with the embedded Unity project (should be valid)
+        let project_path = get_unity_project_path();
+        assert!(UnityProjectManager::is_unity_project_path(
+            &project_path.to_string_lossy()
+        ));
+
+        // Test with an invalid path (non-existent directory)
+        assert!(!UnityProjectManager::is_unity_project_path("/non/existent/path"));
+
+        // Test with a path that exists but is not a Unity project
+        let cargo_manifest_dir = env!("CARGO_MANIFEST_DIR");
+        assert!(!UnityProjectManager::is_unity_project_path(cargo_manifest_dir));
+
+        // Test with empty string
+        assert!(!UnityProjectManager::is_unity_project_path(""));
+
+        // Test with current directory (should not be a Unity project)
+        assert!(!UnityProjectManager::is_unity_project_path("."));
     }
 
     #[tokio::test]

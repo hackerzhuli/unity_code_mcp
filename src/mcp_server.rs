@@ -1,15 +1,17 @@
 use crate::unity_messages::{TestFilter, TestMode};
 use crate::unity_manager::UnityManager;
-use log::info;
+use crate::unity_project_manager::UnityProjectManager;
+use log::{info, warn};
 use rmcp::{
-    ErrorData as McpError, ServerHandler,
+    ErrorData as McpError, RoleServer, ServerHandler,
     handler::server::{router::tool::ToolRouter, tool::Parameters},
     model::*,
     schemars, tool, tool_handler, tool_router,
+    service::RequestContext,
 };
 use serde_json::json;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use tokio::sync::Mutex as TokioMutex;
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct RunTestsRequest {
@@ -24,36 +26,107 @@ pub struct RunTestsRequest {
 /// Unity Code MCP Server that provides tools for Unity Editor integration
 #[derive(Clone)]
 pub struct UnityCodeMcpServer {
-    unity_manager: Arc<Mutex<Option<UnityManager>>>,
-    project_path: String,
+    unity_manager: Arc<TokioMutex<Option<UnityManager>>>,
+    project_path: Arc<Mutex<Option<String>>>,
     tool_router: ToolRouter<UnityCodeMcpServer>,
 }
 
 #[tool_router]
 impl UnityCodeMcpServer {
     /// Create a new Unity Code MCP Server
-    pub fn new(project_path: String) -> Self {
+    pub fn new(fallback_project_path: Option<String>) -> Self {
+        // Validate the fallback project path before storing it
+        let validated_path = fallback_project_path.and_then(|path| {
+            if UnityProjectManager::is_unity_project_path(&path) {
+                Some(path)
+            } else {
+                warn!("Provided fallback project path is not a valid Unity project: {}", path);
+                None
+            }
+        });
+        
         Self {
-            unity_manager: Arc::new(Mutex::new(None)),
-            project_path,
+            unity_manager: Arc::new(TokioMutex::new(None)),
+            project_path: Arc::new(Mutex::new(validated_path)),
             tool_router: Self::tool_router(),
         }
     }
 
     /// Get a reference to the unity manager for external access
-    pub fn get_unity_manager(&self) -> &Arc<Mutex<Option<UnityManager>>> {
+    pub fn get_unity_manager(&self) -> &Arc<TokioMutex<Option<UnityManager>>> {
         &self.unity_manager
+    }
+
+    /// Get the current project path, resolving it if necessary
+    async fn get_project_path(&self) -> Result<String, McpError> {
+        let project_path_guard = self.project_path.lock().unwrap();
+        if let Some(path) = project_path_guard.as_ref() {
+            Ok(path.clone())
+        } else {
+            Err(McpError::internal_error(
+                "No Unity project path available. Please ensure roots are set or UNITY_PROJECT_PATH environment variable is configured.".to_string(),
+                None,
+            ))
+        }
+    }
+
+    /// Set the project path (used when roots are detected)
+    pub fn set_project_path(&self, path: String) {
+        if UnityProjectManager::is_unity_project_path(&path) {
+            let mut project_path_guard = self.project_path.lock().unwrap();
+            *project_path_guard = Some(path);
+        } else {
+            warn!("Attempted to set invalid Unity project path: {}", path);
+        }
+    }
+
+    /// Try to detect Unity project from client roots during initialization
+    async fn try_detect_from_roots_if_needed(&self, context: &RequestContext<RoleServer>) -> Result<(), McpError> {
+        // Only try to detect if we don't have a project path yet
+        {
+            let project_path_guard = self.project_path.lock().unwrap();
+            if project_path_guard.is_some() {
+                return Ok(());
+            }
+        } // Guard is dropped here before await
+        
+        // Try to request roots from client
+        match context.peer.list_roots().await {
+            Ok(roots_result) => {
+                info!("Received {} roots from client", roots_result.roots.len());
+                
+                // Find the first root that is a Unity project
+                for root in &roots_result.roots {
+                    if let Some(path) = root.uri.strip_prefix("file://") {
+                        let normalized_path = path.replace("/", "\\");
+                        if UnityProjectManager::is_unity_project_path(&normalized_path) {
+                            info!("Found Unity project at: {}", normalized_path);
+                            self.set_project_path(normalized_path);
+                            return Ok(());
+                        }
+                    }
+                }
+                
+                warn!("No Unity project found in the provided roots");
+            }
+            Err(e) => {
+                info!("Client does not support roots capability or error occurred: {}", e);
+            }
+        }
+        
+        Ok(())
     }
 
     /// Initialize the Unity manager and messaging client
     pub async fn ensure_unity_manager(&self) -> Result<(), McpError> {
         let mut manager_guard = self.unity_manager.lock().await;
         if manager_guard.is_none() {
-            match UnityManager::new(self.project_path.clone()).await {
+            let project_path = self.get_project_path().await?;
+            match UnityManager::new(project_path).await {
                 Ok(mut manager) => {
                     if let Err(e) = manager.update_unity_connection().await {
                         return Err(McpError::internal_error(
-                            format!("Failed to upadte unity connection: {}", e),
+                            format!("Failed to update unity connection: {}", e),
                             None,
                         ));
                     }
@@ -192,9 +265,38 @@ impl ServerHandler for UnityCodeMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             protocol_version: ProtocolVersion::V_2024_11_05,
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
+            capabilities: ServerCapabilities::builder()
+                .enable_tools()
+                .build(),
             server_info: Implementation::from_build_env(),
             instructions: Some("Unity Code MCP Server for Unity Editor integration".into()),
         }
+    }
+
+    async fn initialize(
+        &self,
+        _request: InitializeRequestParam,
+        context: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, McpError> {
+        info!("Client connected, attempting to detect Unity project path...");
+        
+        // Try to detect Unity project from roots eagerly
+        self.try_detect_from_roots_if_needed(&context).await?;
+        
+        // Initialize Unity manager immediately if we have a project path
+        if let Err(e) = self.ensure_unity_manager().await {
+            warn!("Failed to initialize Unity manager during client connection: {}", e);
+        } else {
+            info!("Unity manager initialized successfully");
+        }
+        
+        Ok(InitializeResult {
+            protocol_version: ProtocolVersion::V_2024_11_05,
+            capabilities: ServerCapabilities::builder()
+                .enable_tools()
+                .build(),
+            server_info: Implementation::from_build_env(),
+            instructions: Some("Unity Code MCP Server for Unity Editor integration".into()),
+        })
     }
 }

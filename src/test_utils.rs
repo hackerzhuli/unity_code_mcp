@@ -28,7 +28,7 @@ pub fn create_test_uss_file(project_path: &std::path::Path) -> std::path::PathBu
 
 /// Deletes the test USS file and its .meta file
 pub fn cleanup_test_uss_file(uss_path: &std::path::Path) {
-    if uss_path.exists() {
+    if uss_path.try_exists().unwrap_or(false) {
         if let Err(e) = std::fs::remove_file(uss_path) {
             eprintln!("Warning: Failed to delete test USS file: {}", e);
         }
@@ -37,7 +37,7 @@ pub fn cleanup_test_uss_file(uss_path: &std::path::Path) {
     // Also delete the .meta file to ensure if we create the uss file again
     // unity will treat it as a new file
     let meta_path = uss_path.with_extension("uss.meta");
-    if meta_path.exists() {
+    if meta_path.try_exists().unwrap_or(false) {
         if let Err(e) = std::fs::remove_file(&meta_path) {
             eprintln!("Warning: Failed to delete test USS .meta file: {}", e);
         }
@@ -72,7 +72,7 @@ namespace UnityProject
 
     // Ensure the Scripts directory exists
     let scripts_dir = cs_path.parent().unwrap();
-    if !scripts_dir.exists() {
+    if !scripts_dir.try_exists().unwrap_or(false) {
         std::fs::create_dir_all(scripts_dir).expect("Failed to create Scripts directory");
     }
 
@@ -82,7 +82,7 @@ namespace UnityProject
 
 /// Deletes the test C# script and its .meta file
 pub fn cleanup_test_cs_script(cs_path: &std::path::Path) {
-    if cs_path.exists() {
+    if cs_path.try_exists().unwrap_or(false) {
         if let Err(e) = std::fs::remove_file(cs_path) {
             eprintln!("Warning: Failed to delete test C# script: {}", e);
         }
@@ -90,7 +90,7 @@ pub fn cleanup_test_cs_script(cs_path: &std::path::Path) {
 
     // Also delete the .meta file to ensure Unity recognizes the change
     let meta_path = cs_path.with_extension("cs.meta");
-    if meta_path.exists() {
+    if meta_path.try_exists().unwrap_or(false) {
         if let Err(e) = std::fs::remove_file(&meta_path) {
             eprintln!("Warning: Failed to delete test C# script .meta file: {}", e);
         }
@@ -136,7 +136,7 @@ namespace UnityProject
 
     // Ensure the Scripts directory exists
     let scripts_dir = cs_path.parent().unwrap();
-    if !scripts_dir.exists() {
+    if !scripts_dir.try_exists().unwrap_or(false) {
         std::fs::create_dir_all(scripts_dir).expect("Failed to create Scripts directory");
     }
 
@@ -146,7 +146,7 @@ namespace UnityProject
 
 /// Deletes the test C# script with errors and its .meta file
 pub fn cleanup_test_cs_script_with_errors(cs_path: &std::path::Path) {
-    if cs_path.exists() {
+    if cs_path.try_exists().unwrap_or(false) {
         if let Err(e) = std::fs::remove_file(cs_path) {
             eprintln!(
                 "Warning: Failed to delete test C# script with errors: {}",
@@ -157,7 +157,7 @@ pub fn cleanup_test_cs_script_with_errors(cs_path: &std::path::Path) {
 
     // Also delete the .meta file to ensure Unity recognizes the change
     let meta_path = cs_path.with_extension("cs.meta");
-    if meta_path.exists() {
+    if meta_path.try_exists().unwrap_or(false) {
         if let Err(e) = std::fs::remove_file(&meta_path) {
             eprintln!(
                 "Warning: Failed to delete test C# script with errors .meta file: {}",

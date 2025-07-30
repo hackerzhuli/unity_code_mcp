@@ -16,44 +16,50 @@ mod unity_test_task;
 
 use crate::logging::init_logging;
 use crate::mcp_server::UnityCodeMcpServer;
-use log::{error, info};
+use crate::unity_project_manager::UnityProjectManager;
+use log::{error, info, warn};
 use rmcp::{
     ServiceExt,
     transport::stdio,
 };
+use std::env;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     // Initialize logging
     init_logging();
 
-    // Get Unity project path from environment variable or use default
-    let project_path = std::env::var("UNITY_PROJECT_PATH").unwrap_or_else(|_| ".".to_string());
+    info!("Starting Unity Code MCP Server...");
 
-    info!(
-        "Starting Unity Code MCP Server for project: {}",
-        project_path
-    );
+    // Try to get project path from environment variable as fallback
+    let fallback_project_path = env::var("UNITY_PROJECT_PATH").ok();
+    
+    // Validate fallback path if provided
+     let validated_fallback = if let Some(ref path) = fallback_project_path {
+         if UnityProjectManager::is_unity_project_path(path) {
+             info!("Found valid Unity project at UNITY_PROJECT_PATH: {}", path);
+             Some(path.clone())
+         } else {
+             warn!("UNITY_PROJECT_PATH does not point to a valid Unity project: {}", path);
+             None
+         }
+     } else {
+         info!("No UNITY_PROJECT_PATH environment variable set");
+         None
+     };
 
-    // Create the MCP server
-    let server = UnityCodeMcpServer::new(project_path);
+    // Create the MCP server with optional fallback path
+    // The server will prioritize roots capability over this fallback
+    let server = UnityCodeMcpServer::new(validated_fallback);
 
-    // Initialize Unity manager once at startup
-    if let Err(e) = server.ensure_unity_manager().await {
-        log::warn!("Initial Unity manager initialization failed: {:?}", e);
-    }
-
-    // Start background Unity connection monitoring
+    // Start background task to monitor Unity connection
+    // Initial connection is handled eagerly during client initialization
     let server_clone = server.clone();
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
         loop {
-            interval.tick().await;
-            let mut manager_guard = server_clone.get_unity_manager().lock().await;
-            if let Some(manager) = manager_guard.as_mut() {
-                if let Err(e) = manager.update_unity_connection().await {
-                    log::debug!("Unity connection update failed: {:?}", e);
-                }
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            if let Err(e) = server_clone.ensure_unity_manager().await {
+                error!("Failed to ensure Unity manager: {}", e);
             }
         }
     });
@@ -63,7 +69,8 @@ async fn main() -> anyhow::Result<()> {
         error!("serving error: {:?}", e);
     })?;
 
-    info!("MCP Server started successfully");
+    info!("Unity Code MCP Server ready. Waiting for client connection...");
+    info!("The server will use roots capability for dynamic project detection if supported by the client.");
     service.waiting().await?;
     info!("MCP Server stopped");
 
