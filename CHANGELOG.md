@@ -2,7 +2,7 @@
 
 All notable changes to Unity Code MCP Server will be documented in this file.
 
-## [Unreleased]
+## [1.1.3] - 2025-08-01
 
 ### Added
 - Dynamic Unity project detection using MCP `roots` capability from client
