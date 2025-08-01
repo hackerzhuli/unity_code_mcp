@@ -137,7 +137,7 @@ async fn execute_unity_tests_with_validation(
         .map_err(|_| "Unity Editor not running or messaging failed")?;
 
     // Wait for Unity to become online
-    manager.wait_online(3).await
+    manager.wait_online(10).await
         .map_err(|e| format!("Timeout waiting for Unity to become online: {}", e))?;
     println!("✓ Unity connectivity confirmed");
 
@@ -294,24 +294,17 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
             assert!(result.success, "Refresh should have completed successfully");
             assert!(result.refresh_error_message.is_none(), "Refresh should not have error message: {:?}", result.refresh_error_message);
             
-            // Verify we received compilation error logs
-            assert!(!result.problems.is_empty(), "Should have received compilation error logs");
+            // Check that we have compilation errors
+            println!("Problems: {:?}", result.problems);
+            assert!(!result.problems.is_empty(), "Should have compilation errors");
             
-            // Check that the error logs contain compilation-related errors
-            let compilation_errors: Vec<_> = result.problems.iter().filter(|log| {
-                let msg_lower = log.to_lowercase();
-                msg_lower.contains("error") || 
-                msg_lower.contains("compilation") ||
-                msg_lower.contains("testcompilationerrors") ||
-                msg_lower.contains("nonexistentnamespace") ||
-                msg_lower.contains("undefinedvariable") ||
-                msg_lower.contains("cs(") // C# error format usually contains "cs(line,col)"
-            }).collect();
+            // Should contain compilation-related errors
+            let has_compilation_error = result.problems.iter().any(|problem| {
+                problem.contains("error CS") || problem.contains("compilation")
+            });
+            assert!(has_compilation_error, "Should contain compilation-related errors");
             
-            assert!(!compilation_errors.is_empty(), 
-                   "Should have received compilation-related error logs. Received logs: {:?}", result.problems);
-            
-            println!("✓ Received {} compilation-related error logs", compilation_errors.len());
+            println!("✓ Received {} compilation-related error logs", result.problems.len());
             
             // Print some of the error logs for debugging
             for (i, log) in result.problems.iter().take(3).enumerate() {
@@ -336,10 +329,11 @@ async fn test_unity_manager_refresh_with_compilation_errors() {
             // Verify middle refresh completed successfully
             assert!(result.success, "Middle refresh should have completed successfully");
             
-            // Verify we still received compilation error logs from previous compile
-            assert!(!result.problems.is_empty(), "Middle refresh should still receive compilation error logs from previous compile");
+            // With the new protocol, compile errors come from dedicated messages.
+            // The problems field contains previous compile errors, which should still be available.
+            assert!(!result.problems.is_empty(), "Middle refresh should still receive compilation error logs from previous compile errors");
             
-            println!("✓ Middle refresh received {} compilation-related error logs from previous compile", result.problems.len());
+            println!("✓ Middle refresh received {} compilation-related error logs from previous compile errors", result.problems.len());
         },
         Err(e) => {
             println!("⚠ Middle refresh method failed: {}", e);

@@ -237,45 +237,22 @@ impl UnityManager {
                                 {
                                     *compilation_guard = Some(compilation_finish_time);
                                 }
-
-                                // Wait 1 second for logs to arrive after compilation finish event
-                                let log_manager_clone = log_manager.clone();
-                                let last_compile_errors_clone = last_compile_errors.clone();
-                                tokio::spawn(async move {
-                                    // give it a little bit more time, 3 seconds to make sure we don't miss any logs
-                                    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-                                    
-                                    // Collect compile errors from logs
-                                    if let Ok(log_manager_guard) = log_manager_clone.lock() {
-                                        if let Ok(mut compile_errors_guard) = last_compile_errors_clone.lock()
-                                        {
-                                            // start a bit earlier than compilation finish time in case messages are not received in order
-                                            let logs = log_manager_guard.get_recent_logs(compilation_finish_time - Duration::from_secs(1), Some(LogLevel::Error), Some("error CS"));
-                                            for log_entry in logs {
-                                                let main_message =
-                                                    extract_main_message(&log_entry.message);
-                                                compile_errors_guard.push(main_message);
-                                            }
-                                            debug_log!("Compilation finished - collected {} compile errors: {:?}", compile_errors_guard.len(), compile_errors_guard);
-                                        }
-                                    }
-                                });
                             }
                             UnityEvent::CompileErrors(log_container) => {
-                                // Handle initial compile errors from Unity
-                                // If we never received compile finish events
-                                // then this is the initial compile errors before we connect to Unity
+                                // Handle compile errors from Unity
+                                // Update compile errors whenever we receive them
+                                if let Ok(mut compile_errors_guard) = last_compile_errors.lock() {
+                                    compile_errors_guard.clear();
+                                    for log in &log_container.logs {
+                                        let main_message = extract_main_message(&log.message);
+                                        compile_errors_guard.push(main_message);
+                                    }
+                                    debug_log!("Compile errors received from Unity: {} errors", compile_errors_guard.len());
+                                }
+
+                                // If this is the first time we receive compile errors, set the compilation finished time
                                 if let Ok(mut last_compilation_finished_guard) = last_compilation_finished.lock() {
                                     if last_compilation_finished_guard.is_none() {
-                                        if let Ok(mut compile_errors_guard) = last_compile_errors.lock() {
-                                            compile_errors_guard.clear();
-                                            for log in &log_container.logs {
-                                                let main_message = extract_main_message(&log.message);
-                                                compile_errors_guard.push(main_message);
-                                            }
-                                            debug_log!("Initial compile errors received from Unity: {} errors", compile_errors_guard.len());
-                                        }
-
                                         // compile didn't happen just now, but we can use now as a fake compile time, it's ok
                                         *last_compilation_finished_guard = Some(SystemTime::now());
                                     }
@@ -697,56 +674,13 @@ impl UnityManager {
                 }
             }
 
-            // Wait additional time for compile errors to arrive after compilation finishes
+            // Wait a fixed 100ms for compile errors to arrive after compilation finishes
             if refresh_task.is_successful() && refresh_task.has_compilation() {
-                // Wait for either Unity to go offline (domain reload = compilation success)
-                // or compile errors to arrive (compilation failed)
-                let mut received_compile_errors = false;
-                let wait_timeout = Duration::from_secs(3); // 3 second timeout for waiting
-                let wait_start = std::time::Instant::now();
-                
-                while wait_start.elapsed() < wait_timeout {
-                    match timeout(Duration::from_millis(100), event_receiver.recv()).await {
-                        Ok(Ok(event)) => {
-                            match event {
-                                UnityEvent::OnlineStateChanged(is_online) => {
-                                    if !is_online {
-                                        // Unity went offline -> domain reload happened -> compilation success!
-                                        debug_log!("Unity went offline, domain reload detected - compilation successful");
-                                        break;
-                                    }
-                                }
-                                UnityEvent::LogMessage { level: LogLevel::Error, message } => {
-                                    // Check if this is a compile error log -> compilation failed
-                                    if message.contains("error CS") {
-                                        debug_log!("Compile error detected in log message - compilation failed");
-                                        received_compile_errors = true;
-                                        break;
-                                    }
-                                }
-                                _ => {
-                                    // Ignore other events
-                                }
-                            }
-                        }
-                        Ok(Err(_)) => {
-                            // Event channel closed
-                            break;
-                        }
-                        Err(_) => {
-                            // Timeout, continue waiting
-                        }
-                    }
-                }
-                
-                // Give a small additional delay if we received compile errors to ensure all are collected
-                if received_compile_errors {
-                    sleep(Duration::from_millis(100)).await;
-                }
+                sleep(Duration::from_millis(200)).await;
             }
 
-            let previous_compile_errors = self.get_last_compile_errors();
-            let result = refresh_task.build_result(&self.log_manager, &previous_compile_errors);
+            let compile_errors = self.get_last_compile_errors();
+            let result = refresh_task.build_result(&self.log_manager, &compile_errors);
             Ok(result)
         } else {
             Err(MESSAGING_CLIENT_NOT_INIT_ERROR.into())

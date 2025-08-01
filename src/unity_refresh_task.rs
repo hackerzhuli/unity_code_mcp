@@ -138,15 +138,13 @@ impl UnityRefreshAssetDatabaseTask {
     pub fn build_result(
         &self,
         log_manager: &std::sync::Arc<std::sync::Mutex<UnityLogManager>>,
-        previous_compile_errors: &[String],
+        compile_errors: &[String],
     ) -> RefreshResult {
-        let mut logs = self.collect_refresh_logs(log_manager);
-        
-        // If no compilation occurred during this refresh, include previous compile errors
-        if !self.is_compile && !previous_compile_errors.is_empty() {
-            logs.extend_from_slice(previous_compile_errors);
-        }
-        
+        let mut logs = Vec::new();
+        logs.extend_from_slice(compile_errors);
+        let other_logs = self.collect_refresh_logs(log_manager);
+        logs.extend(other_logs);
+
         let duration = self.operation_start.elapsed().as_secs_f64();
 
         RefreshResult {
@@ -165,12 +163,13 @@ impl UnityRefreshAssetDatabaseTask {
     ) -> Vec<String> {
         let mut logs: Vec<String> = Vec::new();
 
-        // Get errors and warnings during this refresh (excluding CS warnings because there can be too many)
+        // Get errors and warnings during this refresh (excluding CS warnings and compile errors)
         if let Ok(log_manager_guard) = log_manager.lock() {
             let recent_logs = log_manager_guard.get_recent_logs(self.refresh_start_time, None, None);
 
             for log in recent_logs {
                 if !log.message.contains("warning CS")
+                    && !log.message.contains("error CS")
                     && (log.level == LogLevel::Error || log.level == LogLevel::Warning)
                 {
                     logs.push(extract_main_message(log.message.as_str()));
