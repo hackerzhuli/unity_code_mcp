@@ -2,7 +2,7 @@
 
 All notable changes to Unity Code MCP Server will be documented in this file.
 
-## [1.1.4] - 
+## [1.1.4] - 2025-08-07
 ### Improved
 - More stable compile error reporting with tool `refresh_asset_database` based on Unity's API `CompilationPipeline.assemblyCompilationFinished` instead of error logs.
 
