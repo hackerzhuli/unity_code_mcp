@@ -2,6 +2,11 @@
 
 All notable changes to Unity Code MCP Server will be documented in this file.
 
+## [1.1.5] - 2026-03-04
+
+### Fixed
+- Fixed tool schema incompatibility with GPT models by updating `rmcp` dependency from 0.3.0 to 0.17.0
+
 ## [1.1.4] - 2025-08-07
 ### Improved
 - More stable compile error reporting with tool `refresh_asset_database` based on Unity's API `CompilationPipeline.assemblyCompilationFinished` instead of error logs.
