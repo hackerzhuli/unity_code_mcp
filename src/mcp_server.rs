@@ -4,7 +4,7 @@ use crate::unity_project_manager::UnityProjectManager;
 use log::{info, warn};
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
-    handler::server::{router::tool::ToolRouter, tool::Parameters},
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::*,
     schemars, tool, tool_handler, tool_router,
     service::RequestContext,
