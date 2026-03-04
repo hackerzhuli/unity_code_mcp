@@ -81,6 +81,8 @@ AI agent in action, tell Kimi K2 to fix compile errors in Unity project with no 
 ### Step 1: Install Unity Package
 Install the [Visual Studio Code Editor](https://github.com/hackerzhuli/com.hackerzhuli.code) package in your Unity project.
 
+> **Important**: The Visual Studio Code Editor package must be **enabled** (that is, you most select an external script editor provided by Visual Studio Code Editor for it to be enabled) for unity_code_mcp to work. Verify this in Unity at `Preferences` → `External Tools` → `External Script Editor` - it should show something like "Visual Studio Code Editor v1.0.12 enabled".
+
 ### Step 2: Get the Binary
 **Option A: Download Release** (Recommended) (Windows Only)
 - Download the latest binary from the Releases page
